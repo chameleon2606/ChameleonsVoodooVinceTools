@@ -21,7 +21,7 @@ static void create_padding(vector<char>* char_list, const unsigned long* offset)
 }
 
 void conver_wav(const string& wav_file) {
-    ifstream inputFile("../"+wav_file,ios::binary);
+    ifstream inputFile(SOURCE_FILES_PATH+wav_file,ios::binary);
     if (!inputFile.is_open()) {
         cerr << "Error opening file\n";
         return;
@@ -42,24 +42,27 @@ void conver_wav(const string& wav_file) {
         buffer_string += byte1;
     }
     if(buffer_string == "data") {
+        // this should be a file that's already good to use
         return;
     }
 
+    cout << "changing file " << wav_file << "\n";
+
     inputFile.seekg(0, ios::beg);
-    vector<char> start_of_file(36);
+    vector<char> start_of_file(36);  // wav files exported with audacity will always have a header size of 36
     inputFile.read(start_of_file.data(), start_of_file.size());
 
     inputFile.seekg(0, ios::end);
     const long long file_size = inputFile.tellg();
 
-    inputFile.seekg(36, ios::beg);
     vector<char> rest_of_file(file_size-36);
+    inputFile.seekg(36, ios::beg);
     inputFile.read(rest_of_file.data(), rest_of_file.size());
     constexpr char header[28] = {'P', 'A', 'A', 'D', 0x14, 0x00, 0x00, 0x00};
 
-    fstream new_file("../bin2.txt", ios::in | ios::out | ios::binary | ios::trunc);
+    fstream new_file(SOURCE_FILES_PATH+wav_file, ios::in | ios::out | ios::binary | ios::trunc);
     if (!new_file) {
-        cerr << "Error opening new file\n";
+        cerr << "Error creating new file\n";
         return;
     }
 
@@ -269,6 +272,13 @@ void repack()
         fstream hot(outputPath + string(get_level_data("path")) + file_type + ".hot", ios::in | ios::out | ios::binary | ios::trunc);
 
         level_file_list = get_level_data(file_type);
+        if (!repackingTextures)
+        {
+            for (const string& file : level_file_list)
+            {
+                conver_wav(file);
+            }
+        }
 
         raw_data_bytes = construct_raw_data();
         raw_data_size = raw_data_bytes.size();
