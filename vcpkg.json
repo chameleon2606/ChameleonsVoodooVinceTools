@@ -1,0 +1,5 @@
+﻿{
+  "name": "OpenGL",
+  "version": "1.0",
+  "dependencies": ["imgui", "glfw3","glew"]
+}
