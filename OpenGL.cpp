@@ -8,6 +8,7 @@
 #include "Repacking.h"
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
+#include <windows.h>
 
 using namespace std;
 
@@ -49,6 +50,8 @@ static void framebuffer_size_callback(GLFWwindow* window, int width, int height)
 
 int main(void)
 {
+    //makes console dissapear
+    ::ShowWindow(::GetConsoleWindow(), SW_HIDE);
     if(!glfwInit()){ exit(EXIT_FAILURE); }
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
