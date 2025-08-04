@@ -174,8 +174,10 @@
     <ClCompile Include="include\ImGui\imgui_impl_opengl3.cpp" />
     <ClCompile Include="include\ImGui\imgui_tables.cpp" />
     <ClCompile Include="include\ImGui\imgui_widgets.cpp" />
-    <ClCompile Include="OpenGL.cpp" />
-    <ClCompile Include="Repacking.cpp" />
+    <ClCompile Include="main_window.cpp" />
+    <ClCompile Include="model_extractor.cpp" />
+    <ClCompile Include="openGL.cpp" />
+    <ClCompile Include="repacking.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="level_data.json" />
@@ -237,8 +239,10 @@
     <ClInclude Include="include\x64\GL\glew.h" />
     <ClInclude Include="include\x64\GL\glxew.h" />
     <ClInclude Include="include\x64\GL\wglew.h" />
-    <ClInclude Include="OpenGL.h" />
-    <ClInclude Include="Repacking.h" />
+    <ClInclude Include="main_window.h" />
+    <ClInclude Include="model_extractor.h" />
+    <ClInclude Include="openGL.h" />
+    <ClInclude Include="repacking.h" />
   </ItemGroup>
   <ItemGroup>
     <Folder Include="output\vincedata\" />
