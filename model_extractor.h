@@ -2,5 +2,5 @@
 #include "repacking.h"
 
 
-void init_extractor();
+void init_model_extractor();
 void m_extractor_loop();

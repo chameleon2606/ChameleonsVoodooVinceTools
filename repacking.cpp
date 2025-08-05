@@ -8,6 +8,7 @@
 #include <imgui.h>
 #include "repacking.h"
 #include "json.hpp"
+#include "main_window.h"
 
 using json = nlohmann::json;
 using namespace std;
@@ -35,8 +36,7 @@ static unsigned long raw_data_header_index;
 inline FILE * jsonFile;
 inline std::ifstream f("level_data.json");
 inline nlohmann::json jsonData = nlohmann::json::parse(f);
-static char game_path_input[128];
-static char source_files_path_input[128];
+static char source_files_path[128];
 static std::string repacking_mode = "texture";
 static int e;
 static float level_progress;
@@ -45,8 +45,7 @@ inline auto startTime = std::chrono::high_resolution_clock::now();
 inline auto endTime = std::chrono::high_resolution_clock::now();
 static unsigned long long max_progress_value;
 static bool repackingTextures = true;
-static bool valid_game_dir = false;
-static bool valid_source_dir = filesystem::exists(SOURCE_FILES_PATH);
+static bool valid_dir;
 vector<int> name_offsets;
 
 
@@ -88,9 +87,7 @@ void conver_wav(const string& wav_file) {
         // this should be a file that's already good to use
         return;
     }
-
-    cout << "changing file " << wav_file << "\n";
-
+    
     inputFile.seekg(0, ios::beg);
     vector<char> start_of_file(36);  // wav files exported with audacity will always have a header size of 36
     inputFile.read(start_of_file.data(), start_of_file.size());
@@ -182,15 +179,6 @@ vector<char> construct_filenames() {
 }
 
 vector<char> construct_file_metadata() {
-    nlohmann::basic_json<> mystery_number_array;
-    if (repackingTextures)
-    {
-        mystery_number_array = get_level_data("mystery_dds_numbers");
-    }
-    else
-    {
-        mystery_number_array = get_level_data("mystery_wav_numbers");
-    }
     vector<char> file_info_table;
     vector<uint8_t> header_bytes = int_to_bytes(SRC_FILE_HEADER_SIZE);
     const unsigned long level_list_number = level_file_list.size();
@@ -357,19 +345,15 @@ void repack()
     isRepacking = false;
 }
 
+
 void init_repacker()
 {
-    //repacking_mode = "texture";
-    //SOURCE_FILES_PATH = filesystem::current_path().string() + TEXTURE_PATH;
-    //valid_source_dir = filesystem::exists(SOURCE_FILES_PATH);
-    //SRC_FILE_HEADER_SIZE = DDS_HEADER_SIZE;
-    //repackingTextures = true;
+    string current_path = filesystem::current_path().string() + "\\source files\\";
+    strncpy_s(source_files_path, current_path.c_str(), sizeof(source_files_path) - 1);
+    source_files_path[sizeof(source_files_path) - 1] = '\0'; // Ensure null termination
     
-    filesystem::path source_files_path = filesystem::current_path() / "source files";
-    string source_files_path_str = source_files_path.string();
-    strncpy_s(source_files_path_input, source_files_path_str.c_str(), IM_ARRAYSIZE(source_files_path_input) - 1);
-    source_files_path_input[IM_ARRAYSIZE(source_files_path_input) - 1] = '\0';
-
+    valid_dir = filesystem::exists(current_path + "\\textures\\") && filesystem::exists(current_path + "\\sounds\\");
+    
     max_progress_value = get_file_amount("area");
 }
 
@@ -379,27 +363,18 @@ void repack_loop()
     ImGui::Dummy(ImVec2(0, 20));
 
     if (isRepacking) ImGui::BeginDisabled();
-    
-    if (ImGui::InputText("Source files folder", source_files_path_input, IM_ARRAYSIZE(source_files_path_input)))
+    if (ImGui::InputText("Source files", source_files_path, IM_ARRAYSIZE(source_files_path)))
     {
-        SOURCE_FILES_PATH = source_files_path_input;
-        valid_source_dir = filesystem::exists(SOURCE_FILES_PATH + "\\textures");
-        if (repackingTextures)
-        {
-            SOURCE_FILES_PATH = source_files_path_input;
-            SOURCE_FILES_PATH += "\\textures\\";
-        }
-        else
-        {
-            SOURCE_FILES_PATH = source_files_path_input;
-            SOURCE_FILES_PATH += "\\sounds\\";
-        }
+        string source_files_string(source_files_path);
+        valid_dir = filesystem::exists(source_files_string + "\\textures");
     }
-    
-    if (ImGui::InputText("Game folder path", game_path_input, IM_ARRAYSIZE(game_path_input)))
+    if (!valid_dir)
     {
-        outputPath = string(game_path_input);
-        valid_game_dir = filesystem::exists(outputPath + "\\vincedata\\");
+        ImGui::TextColored(ImVec4(1,0,0,1),"Invalid folder");
+    }
+    else
+    {
+        ImGui::TextColored(ImVec4(0,1,0,1),"Valid folder");
     }
     
     ImGui::Dummy(ImVec2(0,30));
@@ -425,21 +400,20 @@ void repack_loop()
     
     ImGui::Dummy(ImVec2(0,30));
     
-    if (!valid_game_dir || !valid_source_dir)ImGui::BeginDisabled();
+    if (!valid_dir)ImGui::BeginDisabled();
     if (ImGui::Button("Repack"))
     {
         thread taskThread(repack);
         taskThread.detach();
     }
-    if (!valid_game_dir || !valid_source_dir)ImGui::EndDisabled();
-    
-    if (isRepacking) ImGui::EndDisabled();
+    if (!valid_dir || isRepacking)ImGui::EndDisabled();
     
     ImGui::Dummy(ImVec2(0,30));
     
     ImGui::ProgressBar(level_progress, ImVec2(-1.0f, 0.0f));
-    ImGui::SameLine();
-    ImGui::Text("level progress");
+    
+    string mode = repacking_mode;
+    ImGui::Text(("repacking " + mode).c_str());
     
     if (isRepacking)
     {

@@ -7,19 +7,45 @@
 #include <typeinfo>
 #include "model_extractor.h"
 
+#include "imgui_internal.h"
+#include "main_window.h"
+
 #include "GLFW/glfw3.h"
 #include "GLFW/glfw3native.h"
 
 using namespace std;
 
-char game_path_input[128] = "";
 string path = filesystem::current_path().string()+"\\models\\";
 char output_path[128];
+bool valid_output_path;
+char gator_files_folder[128];
+bool valid_folders;
 static constexpr uint32_t vert_header_size = 48;
 static float uv_scale = 6.0f;
 string error_message;
 constexpr uint16_t bone_info_size = 288;
 constexpr float maxfloat = 3.40282e+38;
+
+bool folder_validation(char folder[])
+{
+    if (filesystem::exists(folder))
+    {
+        return true;
+    }
+    else
+    {
+        return false;
+    }
+}
+
+void init_model_extractor()
+{
+    string current_path = filesystem::current_path().string() + "\\output\\";
+    strncpy_s(output_path, current_path.c_str(), sizeof(output_path) - 1);
+    output_path[sizeof(output_path) - 1] = '\0'; // Ensure null termination
+    valid_folders = filesystem::exists(output_path) && filesystem::exists(gator_files_folder);
+}
+
 
 auto open_file(const string& file_path, const string& file_name)
 {
@@ -56,7 +82,6 @@ auto open_file(const string& file_path, const string& file_name)
     src_file.read(reinterpret_cast<char*>(&current_gator_header), sizeof(gator_header));
     if (strncmp(current_gator_header.magic, "GATR", 4) != 0)
     {
-        cout << current_gator_header.magic << " invalid gator\n";
         glfwTerminate();
     }
     
@@ -77,7 +102,6 @@ auto open_file(const string& file_path, const string& file_name)
         }
         if (texturename.ends_with(".dds"))
         {
-            cout << texturename << "\n";
             bone_data << texturename << endl;
         }
         texturelist.push_back(texturename);    
@@ -194,53 +218,46 @@ auto open_file(const string& file_path, const string& file_name)
         
         if (current_bones.parent_index < 0)
         {
-            cout << "(\"" << current_bones.index << texturelist[current_bones.index] << "\", ";
             bone_data << current_bones.index << " " << texturelist[current_bones.index] << " has no parent\n";
         }
         else
         {
-            cout << "(\"" << current_bones.index << "_" << texturelist[current_bones.index] << "\", ";
             bone_data << current_bones.index << " " << texturelist[current_bones.index] << " connected to " << current_bones.parent_index << " " << texturelist[current_bones.parent_index] << "\n";
         }
         
-        cout << -current_bones.pos_x << ", " << current_bones.pos_y << ", " << current_bones.pos_z << "),\n";
         bone_data << "world position = X: " << current_bones.pos_x << " Y: " << abs(current_bones.pos_y) << " Z: " << current_bones.pos_z << "\n\n";
     }
     
     return texturelist;
 }
 
-void init_extractor()
-{
-    strcpy_s(output_path, path.c_str());
-}
-
 void m_extractor_loop()
 {
-    ImGui::InputText("gator files folder", game_path_input, IM_ARRAYSIZE(game_path_input));
-    ImGui::InputText("output path", output_path, IM_ARRAYSIZE(output_path));
-    
-    if (!filesystem::exists(game_path_input))
+    if (ImGui::InputText("gator files folder", gator_files_folder, IM_ARRAYSIZE(gator_files_folder)) || ImGui::InputText("output path", output_path, IM_ARRAYSIZE(output_path)))
     {
-        ImGui::TextColored(ImVec4(1,0,0,1),"Invalid folder");
-        return;
+        valid_folders = folder_validation(gator_files_folder) && folder_validation(output_path);
     }
-    for (auto& dir_entry : filesystem::directory_iterator(game_path_input))
+
+    if (valid_folders)
     {
-        if (!dir_entry.path().filename().string().ends_with(".gator"))
+        ImGui::TextColored(ImVec4(0,1,0,1),"Valid folders");
+        ImGui::BeginChild("Gator files");
+        for (auto& dir_entry : filesystem::directory_iterator(gator_files_folder))
         {
-            continue;
-        }
-        string filename = dir_entry.path().filename().string();
-        if (ImGui::Selectable(filename.c_str()))
-        {
-            // todo: only input path and seperate the filename in function
-            //open_file(game_path_input, filename);
-            vector<string> textures = open_file(game_path_input, filename);
-            for (auto& tex : textures)
+            if (!dir_entry.path().filename().string().ends_with(".gator"))
             {
-                //cout << tex << "\n";
+                continue;
+            }
+            string filename = dir_entry.path().filename().string();
+            if (ImGui::Selectable(filename.c_str()))
+            {
+                vector<string> textures = open_file(gator_files_folder, filename);
             }
         }
     }
+    else
+    {
+        ImGui::TextColored(ImVec4(1,0,0,1),"Invalid folders");
+    }
+    ImGui::EndChild();
 }

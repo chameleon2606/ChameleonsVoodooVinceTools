@@ -113,14 +113,14 @@
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions);</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>$(ProjectDir)include\x64;$(ProjectDir)include\ImGui;$(ProjectDir)include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)include\x64;$(ProjectDir)include\ImGui;$(ProjectDir)include\zlib;$(ProjectDir)include</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(ProjectDir)libs\x64\glew;$(ProjectDir)libs\x64\glfw</AdditionalLibraryDirectories>
-      <AdditionalDependencies>opengl32.lib;glfw3.lib;glew32.lib;$(CoreLibraryDependencies);%(AdditionalDependencies);</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(ProjectDir)libs\x64\glew;$(ProjectDir)libs\x64\glfw;$(ProjectDir)libs\x64\zlib;</AdditionalLibraryDirectories>
+      <AdditionalDependencies>opengl32.lib;glfw3.lib;glew32.lib;zlib.lib;$(CoreLibraryDependencies);%(AdditionalDependencies);</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -155,18 +155,19 @@
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir)include\x64;$(ProjectDir)include\ImGui;$(ProjectDir)include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)include\x64;$(ProjectDir)include\ImGui;$(ProjectDir)include\zlib;$(ProjectDir)include</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(ProjectDir)libs\x64\glew;$(ProjectDir)libs\x64\glfw</AdditionalLibraryDirectories>
-      <AdditionalDependencies>opengl32.lib;glfw3.lib;glew32.lib;$(CoreLibraryDependencies);%(AdditionalDependencies);</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(ProjectDir)libs\x64\glew;$(ProjectDir)libs\x64\glfw;$(ProjectDir)libs\x64\zlib;</AdditionalLibraryDirectories>
+      <AdditionalDependencies>opengl32.lib;glfw3.lib;glew32.lib;zlib.lib;$(CoreLibraryDependencies);%(AdditionalDependencies);</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="hot_extractor.cpp" />
     <ClCompile Include="include\ImGui\imgui.cpp" />
     <ClCompile Include="include\ImGui\imgui_demo.cpp" />
     <ClCompile Include="include\ImGui\imgui_draw.cpp" />
@@ -187,6 +188,8 @@
     <Content Include="libs\x64\glfw\glfw3.lib" />
     <Content Include="libs\x64\glfw\glfw3dll.lib" />
     <Content Include="libs\x64\glfw\glfw3_mt.lib" />
+    <Content Include="libs\x64\zlib\zlib.dll" />
+    <Content Include="libs\x64\zlib\zlib.lib" />
     <Content Include="OpenGL\Debug\OpenGL.obj" />
     <Content Include="OpenGL\Debug\OpenGL.tlog\CL.command.1.tlog" />
     <Content Include="OpenGL\Debug\OpenGL.tlog\CL.read.1.tlog" />
@@ -223,6 +226,7 @@
     <Content Include="x64\Debug\OpenGL.pdb" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="hot_extractor.h" />
     <ClInclude Include="include\ImGui\imconfig.h" />
     <ClInclude Include="include\ImGui\imgui.h" />
     <ClInclude Include="include\ImGui\imgui_impl_glfw.h" />
@@ -239,13 +243,15 @@
     <ClInclude Include="include\x64\GL\glew.h" />
     <ClInclude Include="include\x64\GL\glxew.h" />
     <ClInclude Include="include\x64\GL\wglew.h" />
+    <ClInclude Include="include\zlib\zconf.h" />
+    <ClInclude Include="include\zlib\zlib.h" />
     <ClInclude Include="main_window.h" />
     <ClInclude Include="model_extractor.h" />
     <ClInclude Include="openGL.h" />
     <ClInclude Include="repacking.h" />
   </ItemGroup>
   <ItemGroup>
-    <Folder Include="output\vincedata\" />
+    <Folder Include="output\" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
