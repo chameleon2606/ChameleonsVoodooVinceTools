@@ -179,6 +179,7 @@
     <ClCompile Include="model_extractor.cpp" />
     <ClCompile Include="openGL.cpp" />
     <ClCompile Include="repacking.cpp" />
+    <ClCompile Include="world_extractor.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="level_data.json" />
@@ -249,6 +250,7 @@
     <ClInclude Include="model_extractor.h" />
     <ClInclude Include="openGL.h" />
     <ClInclude Include="repacking.h" />
+    <ClInclude Include="world_extractor.h" />
   </ItemGroup>
   <ItemGroup>
     <Folder Include="output\" />

@@ -61,7 +61,7 @@ int main(void)
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     display_w = 800;
     display_h = 600;
-    window = glfwCreateWindow(static_cast<int>(display_w), static_cast<int>(display_h), "Chameleon's Texture Repacker", nullptr,nullptr);
+    window = glfwCreateWindow(static_cast<int>(display_w), static_cast<int>(display_h), "Chameleon's Voodoo Tools", nullptr,nullptr);
     glfwMakeContextCurrent(window);
     glfwSetWindowAttrib(window, GLFW_RESIZABLE, GLFW_FALSE);  // disables resizing
     if(glewInit() != GLEW_OK){ exit(EXIT_FAILURE); }

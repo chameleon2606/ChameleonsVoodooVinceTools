@@ -4,6 +4,7 @@
 #include "model_extractor.h"
 #include "main_window.h"
 #include "hot_extractor.h"
+#include "world_extractor.h"
 #include <filesystem>
 
 void init_main()
@@ -26,6 +27,11 @@ void main_loop()
     
     ImGui::BeginTabBar("Chameleon's toolbox");
     {
+        if (ImGui::BeginTabItem("world"))
+        {
+            world_extractor_loop();
+            ImGui::EndTabItem();
+        }
         if (ImGui::BeginTabItem("Hot file extractor"))
         {
             hot_extractor_loop();

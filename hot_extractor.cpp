@@ -4,6 +4,8 @@
 #include <iostream>
 #include "main_window.h"
 #include <fstream>
+#include <thread>
+
 extern "C"{
 #include <zlib.h>
 }
@@ -13,6 +15,7 @@ using namespace std;
 static char output_path[128];
 constexpr uint8_t hot_header_size = 36;
 bool valid_output_dir = false;
+string file_to_extract;
 
 void init_hot_extractor()
 {
@@ -22,9 +25,9 @@ void init_hot_extractor()
     valid_output_dir = filesystem::exists(output_path);
 }
 
-static void extract_hot_file(string path)
+void extract_hot_file()
 {
-    ifstream src_file(path, ios::binary);
+    ifstream src_file(file_to_extract, ios::binary);
     if (!src_file.is_open())
     {
         return;
@@ -118,7 +121,8 @@ static void extract_hot_file(string path)
             // writing uncompressed data
             output_file.write(uncompressed_data.data(), current_file_info.uncompressed_size);
             output_file.close();
-            extract_hot_file(fixed_output_path+filename);
+            file_to_extract = fixed_output_path+filename;
+            extract_hot_file();
         }
         if (output_file.is_open())
         {
@@ -146,7 +150,9 @@ static void display_file_tree(const string& path)
                             {
                                 if (ImGui::Selectable(hot_files.path().filename().string().c_str()))
                                 {
-                                    extract_hot_file(hot_files.path().string());
+                                    file_to_extract = hot_files.path().string();
+                                    thread taskThread(extract_hot_file);
+                                    taskThread.detach();
                                 }
                             }
                         }

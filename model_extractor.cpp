@@ -6,17 +6,16 @@
 #include <filesystem>
 #include <typeinfo>
 #include "model_extractor.h"
-
-#include "imgui_internal.h"
-#include "main_window.h"
-
+#include <thread>
 #include "GLFW/glfw3.h"
-#include "GLFW/glfw3native.h"
 
 using namespace std;
 
 string path = filesystem::current_path().string()+"\\models\\";
+
 char output_path[128];
+string filename;
+string selected_filename;
 bool valid_output_path;
 char gator_files_folder[128];
 bool valid_folders;
@@ -25,6 +24,38 @@ static float uv_scale = 6.0f;
 string error_message;
 constexpr uint16_t bone_info_size = 288;
 constexpr float maxfloat = 3.40282e+38;
+struct gator_header
+{
+    char magic[4];
+    uint32_t version, thing, thing2, vert_count, tri_count, tstrip_count, material_count, bone_count;
+    int16_t thing5, thing6;
+    uint16_t thing7, thing8, table_4_entries, string_count;
+    uint32_t start_of_verts, start_of_tris, tstrip_table, materials_offset, hitbox_data_offset, bones_table, table_4_offset, string_offsets, string_lookup_table;
+    float thing10, thing11, thing12, thing13, thing14, thing15, thing16, thing17, thing18, thing19, thing20;
+};
+struct vert_info
+{
+    float x_pos, y_pos, z_pos;
+    uint32_t thing1, thing2;
+    float x_norm, y_norm, z_norm, x_unknown, y_unknown, z_unknown;
+    uint32_t thing3;
+    float x_uv1, y_uv1, x_uv2, y_uv2;
+};
+struct tstrip_info
+{
+    uint16_t verts_in_strip;
+    uint16_t u_value0[7];
+    float u_value1;
+    uint16_t material_index;
+    uint16_t u_value2[13];
+};
+struct material_info
+{
+    int16_t texture_name_index, u_value0, normal_map_index, environment_texture_index, overlay_texture_index;
+    uint16_t u_values1[7];
+    float u_value2;
+    uint16_t u_values3[18];
+};
 
 bool folder_validation(char folder[])
 {
@@ -40,42 +71,27 @@ bool folder_validation(char folder[])
 
 void init_model_extractor()
 {
-    string current_path = filesystem::current_path().string() + "\\output\\";
+    string current_path = filesystem::current_path().string();
     strncpy_s(output_path, current_path.c_str(), sizeof(output_path) - 1);
     output_path[sizeof(output_path) - 1] = '\0'; // Ensure null termination
     valid_folders = filesystem::exists(output_path) && filesystem::exists(gator_files_folder);
 }
 
 
-auto open_file(const string& file_path, const string& file_name)
+void open_file()
 {
-    string extention;
-    if (!file_path.ends_with("\\"))
-    {
-        extention = "\\";
-        ifstream src_file(file_path + "\\" + file_name, ios::binary);
-    }
+    string gator_string = gator_files_folder;
 
+    size_t last_dot = selected_filename.find_last_of('.');
+
+    string output_path_string = output_path;
     // creates a new .obj file with the name of the gator file
-    size_t last_dot = file_name.find_last_of('.');
-    string new_object_name;
-    if (last_dot != string::npos)
-    {
-        new_object_name = file_name.substr(0, last_dot) + ".obj";
-    }
+    ifstream src_file(gator_string + "\\" + selected_filename, ios::binary);                                                         // input .gator file
+    ofstream new_obj_file(output_path_string + "\\" + selected_filename.substr(0, last_dot) + ".obj", ios::trunc);         // output .obj file
+    new_obj_file << "mtllib " << selected_filename.substr(0, last_dot) << ".mtl\n\n";
+    ofstream new_mtl_file(output_path_string + "\\" + selected_filename.substr(0, last_dot) + ".mtl", ios::trunc);         // output material file
+    ofstream bone_data(output_path_string + "\\" + selected_filename.substr(0, last_dot) + "_bone_data.txt", ios::trunc);  // output info file
     
-    ifstream src_file(file_path + extention + file_name, ios::binary);          // input .gator file
-    ofstream new_obj_file(path + new_object_name, ios::trunc);                  // output .obj file
-    ofstream bone_data(path + new_object_name + "_bone_data.txt", ios::trunc);  // output info file
-    
-    struct gator_header
-    {
-        char magic[4];
-        uint32_t version, thing, thing2, vert_count, tri_count, tstrip_count, table_2_entries, bone_count, extra_object_count; 
-        uint16_t thing7, thing8, table_4_entries, string_count;
-        uint32_t start_of_verts, start_of_tris, tstrip_table, table_2_offset, table_3_offset, bones_table, table_4_offset, string_offsets, start_of_string_table;
-        float thing10, thing11, thing12, thing13, thing14, thing15, thing16, thing17, thing18, thing19, thing20;
-    };
     gator_header current_gator_header;
     
     // reads the header (128 bits)
@@ -89,20 +105,19 @@ auto open_file(const string& file_path, const string& file_name)
     vector<uint32_t> string_offsets(current_gator_header.string_count);
     src_file.read(reinterpret_cast<char*>(string_offsets.data()), current_gator_header.string_count * sizeof(uint32_t));
     vector<string> texturelist;
-
     
     for (auto& offset : string_offsets)
     {
         string texturename;
         char c;
-        src_file.seekg(current_gator_header.start_of_string_table + offset, ios::beg);
+        src_file.seekg(current_gator_header.string_lookup_table + offset, ios::beg);
         while (src_file.read(&c, 1)&& c != '\0')
         {
             texturename += c;
         }
         if (texturename.ends_with(".dds"))
         {
-            bone_data << texturename << endl;
+            //bone_data << texturename << "\n";
         }
         texturelist.push_back(texturename);    
     }
@@ -111,18 +126,10 @@ auto open_file(const string& file_path, const string& file_name)
     
     vector<array<float, 3>> norms;
     vector<array<float, 2>> uvs;
-
+    
     // loop through each vertex data section
     for (uint32_t i=0; i < current_gator_header.vert_count; i++)
     {
-        struct vert_info
-        {
-            float x_pos, y_pos, z_pos;
-            uint32_t thing1, thing2;
-            float x_norm, y_norm, z_norm, x_unknown, y_unknown, z_unknown;
-            uint32_t thing3;
-            float x_uv1, y_uv1, x_uv2, y_uv2;
-        };
         vert_info current_verts;
 
         // grabs all data for that vertex
@@ -154,52 +161,68 @@ auto open_file(const string& file_path, const string& file_name)
         new_obj_file << "vn " << normal[0]*-1 << " " << normal[1] << " " << normal[2] << "\n";
     }
     
-    src_file.seekg(current_gator_header.tstrip_table, ios::beg);
-    vector<uint32_t> strip_list;
-    // loops through the face strips and takes the first value in the table
+    // loops through the face strips and writes the tstrips
+    int last_verts_amount = 0;
     for (uint32_t i = 0; i < current_gator_header.tstrip_count; i++)
     {
-        struct tstrip_info
-        {
-            uint16_t verts_in_strip;
-            uint16_t u_value2[23];
-        };
         tstrip_info current_tstrip;
-        
-        src_file.read(reinterpret_cast<char*>(&current_tstrip), sizeof(tstrip_info));
-        strip_list.push_back(current_tstrip.verts_in_strip);
-        src_file.seekg(current_gator_header.tstrip_table + (vert_header_size*(i+1)), ios::beg);
-    }
 
-    src_file.seekg(current_gator_header.start_of_tris, ios::beg);
-    for (auto& face_count : strip_list)
-    {
-        vector<array<int, 3>> face_list;
-        vector<uint16_t> strip(face_count);
-        src_file.read(reinterpret_cast<char*>(strip.data()), face_count * sizeof(uint16_t));
+        // seek to the beginning of the next tstrip table
+        src_file.clear();
+        src_file.seekg(current_gator_header.tstrip_table + (vert_header_size * i), ios::beg);
+        src_file.read(reinterpret_cast<char*>(&current_tstrip), sizeof(tstrip_info));
+
+        src_file.clear();
+        src_file.seekg(current_gator_header.start_of_tris + (last_verts_amount * sizeof(uint16_t)), ios::beg);
+        vector<uint16_t> strip(current_tstrip.verts_in_strip);
+        src_file.read(reinterpret_cast<char*>(strip.data()), current_tstrip.verts_in_strip * sizeof(uint16_t));
+
+        // creates vertex groups for the .obj file
+        new_obj_file << "\ng " << current_tstrip.verts_in_strip << "\nusemtl Material" << current_tstrip.material_index << "\n\n";
+        
         // goes through each 16bit int value, takes it's value and the 2 following values and stores them in a list
-        for (uint32_t i = 0; i < face_count-2;i++)
+        for (uint16_t k = 0; k < current_tstrip.verts_in_strip-2;k++)
         {
-            int f1 = strip[i + 0];
-            int f2 = strip[i + 1];
-            int f3 = strip[i + 2];
-    
-            if (i & 1)
+            uint16_t f1 = strip[k + 0];
+            uint16_t f2 = strip[k + 1];
+            uint16_t f3 = strip[k + 2];
+
+            if (k & 1)
             {
-                face_list.push_back({f1, f2, f3});
+                new_obj_file << "f " << f1+1 << "/" << f1+1 << "/" << f1+1 << " " << f2+1 << "/" << f2+1 << "/" << f2+1 << " " << f3+1 << "/" << f3+1 << "/" << f3+1 << "\n";
             }
             else
             {
-                face_list.push_back({f2, f1, f3});
+                new_obj_file << "f " << f2+1 << "/" << f2+1 << "/" << f2+1 << " " << f1+1 << "/" << f1+1 << "/" << f1+1 << " " << f3+1 << "/" << f3+1 << "/" << f3+1 << "\n";
             }
         }
-        // creates vertex groups for the .obj file
-        new_obj_file << "\ng " << face_count << "\n\n";
-        for (auto& tri : face_list)
+        last_verts_amount += current_tstrip.verts_in_strip;
+    }
+    
+    for (uint32_t i = 0; i < current_gator_header.material_count; i++)
+    {
+        material_info current_material;
+        src_file.clear();
+        src_file.seekg(current_gator_header.materials_offset + (sizeof(material_info) * i), ios::beg);
+        src_file.read(reinterpret_cast<char*>(&current_material), sizeof(material_info));
+        
+        if (current_material.texture_name_index > -1)
         {
-            new_obj_file << "f " << tri[0]+1 << "/" << tri[0]+1 << "/" << tri[0]+1 << " " << tri[1]+1 << "/" << tri[1]+1 << "/" << tri[1]+1 << " " << tri[2]+1 << "/" << tri[2]+1 << "/" << tri[2]+1 << "\n";
+            size_t last_dot = texturelist[current_material.texture_name_index].find_last_of('.');
+            new_mtl_file << "newmtl Material" << i << "\nmap_Kd " << texturelist[current_material.texture_name_index].substr(0, last_dot) << ".png\n";
+            new_mtl_file << "map_d " << texturelist[current_material.texture_name_index].substr(0, last_dot) << ".png\n";
+        }
+        if (current_material.normal_map_index > -1)
+        {
+            size_t last_dot = texturelist[current_material.normal_map_index].find_last_of('.');
+            new_mtl_file << "bump " << texturelist[current_material.normal_map_index].substr(0, last_dot) << ".png\n\n";
+        }
+        else
+        {
+            new_mtl_file << "\n";
         }
     }
+    
     for (uint32_t i = 0; i < current_gator_header.bone_count; i++)
     {
         struct bones_data
@@ -227,8 +250,11 @@ auto open_file(const string& file_path, const string& file_name)
         
         bone_data << "world position = X: " << current_bones.pos_x << " Y: " << abs(current_bones.pos_y) << " Z: " << current_bones.pos_z << "\n\n";
     }
-    
-    return texturelist;
+
+    bone_data.close();
+    src_file.close();
+    new_mtl_file.close();
+    new_obj_file.close();
 }
 
 void m_extractor_loop()
@@ -248,16 +274,18 @@ void m_extractor_loop()
             {
                 continue;
             }
-            string filename = dir_entry.path().filename().string();
+            filename = dir_entry.path().filename().string();
             if (ImGui::Selectable(filename.c_str()))
             {
-                vector<string> textures = open_file(gator_files_folder, filename);
+                selected_filename = filename;
+                thread taskThread(open_file);
+                taskThread.detach();
             }
         }
+        ImGui::EndChild();
     }
     else
     {
         ImGui::TextColored(ImVec4(1,0,0,1),"Invalid folders");
     }
-    ImGui::EndChild();
 }
