@@ -1,23 +1,22 @@
 ﻿#include <iostream>
 #include <fstream>
-#include <string>
 #include <array>
 #include <imgui.h>
+#include <string>
 #include <filesystem>
 #include <typeinfo>
 #include "model_extractor.h"
 #include <thread>
 #include "GLFW/glfw3.h"
+#include "main_window.h"
 
 using namespace std;
 
 string path = filesystem::current_path().string()+"\\models\\";
 
-char output_path[128];
-string filename;
-string selected_filename;
+//char output_path[128];
 bool valid_output_path;
-char gator_files_folder[128];
+char gator_files_folder[128] = "C:\\Users\\leong\\Desktop\\vince stuff\\output";
 bool valid_folders;
 static constexpr uint32_t vert_header_size = 48;
 static float uv_scale = 6.0f;
@@ -71,26 +70,26 @@ bool folder_validation(char folder[])
 
 void init_model_extractor()
 {
-    string current_path = filesystem::current_path().string();
-    strncpy_s(output_path, current_path.c_str(), sizeof(output_path) - 1);
-    output_path[sizeof(output_path) - 1] = '\0'; // Ensure null termination
-    valid_folders = filesystem::exists(output_path) && filesystem::exists(gator_files_folder);
+    
 }
 
 
-void open_file()
+vector<string> extract_model(string current_filepath)
 {
     string gator_string = gator_files_folder;
+    size_t last_slash = current_filepath.find_last_of('\\');
+    string current_filename = current_filepath.substr(last_slash+1, current_filepath.size()-last_slash);
+    size_t last_dot = current_filename.find_last_of('.');
+    current_filename = current_filename.substr(0,last_dot);
 
-    size_t last_dot = selected_filename.find_last_of('.');
-
-    string output_path_string = output_path;
+    //string output_path_string = output_path;
     // creates a new .obj file with the name of the gator file
-    ifstream src_file(gator_string + "\\" + selected_filename, ios::binary);                                                         // input .gator file
-    ofstream new_obj_file(output_path_string + "\\" + selected_filename.substr(0, last_dot) + ".obj", ios::trunc);         // output .obj file
-    new_obj_file << "mtllib " << selected_filename.substr(0, last_dot) << ".mtl\n\n";
-    ofstream new_mtl_file(output_path_string + "\\" + selected_filename.substr(0, last_dot) + ".mtl", ios::trunc);         // output material file
-    ofstream bone_data(output_path_string + "\\" + selected_filename.substr(0, last_dot) + "_bone_data.txt", ios::trunc);  // output info file
+    //ifstream src_file(gator_string + "\\" + selected_filename, ios::binary);                                                                 // input .gator file
+    ifstream src_file(current_filepath, ios::binary);                                                                                    // input .gator file
+    ofstream new_obj_file(combined_output_path + "\\" + current_filename + ".obj", ios::trunc);        // output .obj file
+    new_obj_file << "mtllib " << current_filename << ".mtl\n\n";
+    ofstream new_mtl_file(combined_output_path + "\\" + current_filename + ".mtl", ios::trunc);        // output material file
+    ofstream bone_data(combined_output_path+ "\\" + current_filename + "_bone_data.txt", ios::trunc);  // output info file
     
     gator_header current_gator_header;
     
@@ -104,12 +103,14 @@ void open_file()
     src_file.seekg(current_gator_header.string_offsets, ios::beg);
     vector<uint32_t> string_offsets(current_gator_header.string_count);
     src_file.read(reinterpret_cast<char*>(string_offsets.data()), current_gator_header.string_count * sizeof(uint32_t));
-    vector<string> texturelist;
+    vector<string> string_list;
+    vector<string> texture_list;
     
     for (auto& offset : string_offsets)
     {
         string texturename;
         char c;
+        src_file.clear();
         src_file.seekg(current_gator_header.string_lookup_table + offset, ios::beg);
         while (src_file.read(&c, 1)&& c != '\0')
         {
@@ -117,9 +118,9 @@ void open_file()
         }
         if (texturename.ends_with(".dds"))
         {
-            //bone_data << texturename << "\n";
+            texture_list.push_back(texturename);
         }
-        texturelist.push_back(texturename);    
+        string_list.push_back(texturename);    
     }
     
     src_file.seekg(current_gator_header.start_of_verts, ios::beg);
@@ -208,14 +209,14 @@ void open_file()
         
         if (current_material.texture_name_index > -1)
         {
-            size_t last_dot = texturelist[current_material.texture_name_index].find_last_of('.');
-            new_mtl_file << "newmtl Material" << i << "\nmap_Kd " << texturelist[current_material.texture_name_index].substr(0, last_dot) << ".png\n";
-            new_mtl_file << "map_d " << texturelist[current_material.texture_name_index].substr(0, last_dot) << ".png\n";
+            size_t last_dot = string_list[current_material.texture_name_index].find_last_of('.');
+            new_mtl_file << "newmtl Material" << i << "\nmap_Kd " << string_list[current_material.texture_name_index].substr(0, last_dot) << ".png\n";
+            new_mtl_file << "map_d " << string_list[current_material.texture_name_index].substr(0, last_dot) << ".png\n";
         }
         if (current_material.normal_map_index > -1)
         {
-            size_t last_dot = texturelist[current_material.normal_map_index].find_last_of('.');
-            new_mtl_file << "bump " << texturelist[current_material.normal_map_index].substr(0, last_dot) << ".png\n\n";
+            size_t last_dot = string_list[current_material.normal_map_index].find_last_of('.');
+            new_mtl_file << "bump " << string_list[current_material.normal_map_index].substr(0, last_dot) << ".png\n\n";
         }
         else
         {
@@ -241,11 +242,11 @@ void open_file()
         
         if (current_bones.parent_index < 0)
         {
-            bone_data << current_bones.index << " " << texturelist[current_bones.index] << " has no parent\n";
+            bone_data << current_bones.index << " " << string_list[current_bones.index] << " has no parent\n";
         }
         else
         {
-            bone_data << current_bones.index << " " << texturelist[current_bones.index] << " connected to " << current_bones.parent_index << " " << texturelist[current_bones.parent_index] << "\n";
+            bone_data << current_bones.index << " " << string_list[current_bones.index] << " connected to " << current_bones.parent_index << " " << string_list[current_bones.parent_index] << "\n";
         }
         
         bone_data << "world position = X: " << current_bones.pos_x << " Y: " << abs(current_bones.pos_y) << " Z: " << current_bones.pos_z << "\n\n";
@@ -255,13 +256,17 @@ void open_file()
     src_file.close();
     new_mtl_file.close();
     new_obj_file.close();
+
+    return texture_list;
 }
 
 void m_extractor_loop()
 {
-    if (ImGui::InputText("gator files folder", gator_files_folder, IM_ARRAYSIZE(gator_files_folder)) || ImGui::InputText("output path", output_path, IM_ARRAYSIZE(output_path)))
+    if (ImGui::InputText("gator files folder", gator_files_folder, IM_ARRAYSIZE(gator_files_folder)) || ImGui::InputText("output path", global_output_path, IM_ARRAYSIZE(global_output_path)))
     {
-        valid_folders = folder_validation(gator_files_folder) && folder_validation(output_path);
+        valid_folders = folder_validation(gator_files_folder) && folder_validation(global_output_path);
+        combined_output_path = global_output_path;
+        if (!combined_output_path.ends_with("\\"))combined_output_path+="\\";
     }
 
     if (valid_folders)
@@ -274,11 +279,10 @@ void m_extractor_loop()
             {
                 continue;
             }
-            filename = dir_entry.path().filename().string();
+            string filename = dir_entry.path().filename().string();
             if (ImGui::Selectable(filename.c_str()))
             {
-                selected_filename = filename;
-                thread taskThread(open_file);
+                std::thread taskThread(extract_model, dir_entry.path().string());    // we don't pass the string as a reference, cause the name could change while extracting
                 taskThread.detach();
             }
         }

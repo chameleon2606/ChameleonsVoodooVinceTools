@@ -4,10 +4,11 @@
 #include <filesystem>
 #include <fstream>
 #include <array>
+#include <thread>
 
 using namespace std;
 
-char input_path[128] = "C:\\Users\\leong\\Desktop\\vince stuff\\output";
+char input_path[128] = "C:\\Users\\leong\\Desktop\\vince stuff\\output\\vertices.raw";
 char fld_path[128] = "F:\\DotNetProjects\\OpenGLbackup\\output\\tstrip.bin";
 
 void extract_world()
@@ -45,6 +46,7 @@ void extract_world()
     vector<array<int, 3>> face_list;
     vector<uint16_t> strip(1896/2);
     fld_file.read(reinterpret_cast<char*>(strip.data()), 1896);
+    /*
     // goes through each 16bit int value, takes it's value and the 2 following values and stores them in a list
     for (uint32_t i = 0; i < 1896/2-2;i++)
     {
@@ -66,6 +68,7 @@ void extract_world()
         output_file << "f " << tri[0]+1 << "/" << tri[0]+1 << "/" << tri[0]+1 << " " << tri[1]+1 << "/" << tri[1]+1 << "/" << tri[1]+1 << " " << tri[2]+1 << "/" << tri[2]+1 << "/" << tri[2]+1 << "\n";
     }
 
+    */
     fld_file.close();
     input_file.close();
     output_file.close();

@@ -11,6 +11,9 @@ void init_main()
 {
     combined_path = game_path_input;
     combined_path += path_extention;
+
+    combined_output_path = global_output_path;
+    combined_output_path = std::filesystem::current_path().string();
 }
 void main_loop()
 {
@@ -27,12 +30,13 @@ void main_loop()
     
     ImGui::BeginTabBar("Chameleon's toolbox");
     {
+        /*
         if (ImGui::BeginTabItem("world"))
         {
             world_extractor_loop();
             ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem("Hot file extractor"))
+        }*/
+        if (ImGui::BeginTabItem("Resource extractor"))
         {
             hot_extractor_loop();
             ImGui::EndTabItem();
@@ -41,12 +45,12 @@ void main_loop()
         {
             repack_loop();
             ImGui::EndTabItem();
-        }
+        }/*
         if (ImGui::BeginTabItem("Model extractor"))
         {
             m_extractor_loop();
             ImGui::EndTabItem();
-        }
+        }*/
         ImGui::EndTabBar();
     }
 }
