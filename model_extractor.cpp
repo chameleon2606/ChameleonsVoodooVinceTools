@@ -22,7 +22,7 @@ static constexpr uint32_t vert_header_size = 48;
 static float uv_scale = 6.0f;
 string error_message;
 constexpr uint16_t bone_info_size = 288;
-constexpr float maxfloat = 3.40282e+38;
+//constexpr float maxfloat = 3.40282e+38;
 struct gator_header
 {
     char magic[4];
@@ -35,9 +35,10 @@ struct gator_header
 struct vert_info
 {
     float x_pos, y_pos, z_pos;
-    uint32_t thing1, thing2;
+    uint8_t bone1_index, bone2_index, bone3_index, bone4_index;
+    uint8_t bone1_weight, bone2_weight, bone3_weight, bone4_weight;
     float x_norm, y_norm, z_norm, x_unknown, y_unknown, z_unknown;
-    uint32_t thing3;
+    int32_t thing3;
     float x_uv1, y_uv1, x_uv2, y_uv2;
 };
 struct tstrip_info
@@ -54,6 +55,17 @@ struct material_info
     uint16_t u_values1[7];
     float u_value2;
     uint16_t u_values3[18];
+};
+struct bones_data
+{
+    int16_t index, parent_index;
+    uint32_t padding;
+    float value_x, value_y, value_z;
+    float rot_x, rot_y, rot_z;
+    float bind_matrix[4][4];
+    float inverse_bind_matrix[4][4];
+    float bind_matrix_2[4][4];
+    float inverse_bind_matrix_2[4][4];
 };
 
 bool folder_validation(char folder[])
@@ -84,7 +96,6 @@ vector<string> extract_model(string current_filepath)
 
     //string output_path_string = output_path;
     // creates a new .obj file with the name of the gator file
-    //ifstream src_file(gator_string + "\\" + selected_filename, ios::binary);                                                                 // input .gator file
     ifstream src_file(current_filepath, ios::binary);                                                                                    // input .gator file
     ofstream new_obj_file(combined_output_path + "\\" + current_filename + ".obj", ios::trunc);        // output .obj file
     new_obj_file << "mtllib " << current_filename << ".mtl\n\n";
@@ -138,13 +149,21 @@ vector<string> extract_model(string current_filepath)
 
         // puts normal data into a list
         norms.push_back({current_verts.x_norm,current_verts.y_norm,current_verts.z_norm});
-
-        // multiplies the UVs times 6, so they appear correctly
-        current_verts.x_uv1 *= uv_scale;
-        current_verts.y_uv1 *= uv_scale;
-
+        
         // puts UVs into a list
-        uvs.push_back({current_verts.x_uv1, (current_verts.y_uv1 * -1) + 1});   // the UV is flipped upside down
+        if (use_uv2)
+        {
+            // multiplies the UVs times 6, so they appear correctly
+            current_verts.x_uv2 *= uv_scale;
+            current_verts.y_uv2 *= uv_scale;
+            uvs.push_back({current_verts.x_uv2, (current_verts.y_uv2 * -1) + 1});   // flipps the UV upside down
+        }
+        else
+        {
+            current_verts.x_uv1 *= uv_scale;
+            current_verts.y_uv1 *= uv_scale;
+            uvs.push_back({current_verts.x_uv1, (current_verts.y_uv1 * -1) + 1});
+        }
 
         //writes x, y and z position of vertex into the .obj file and flips the x-axis
         new_obj_file << "v " << current_verts.x_pos*-1 << " " << current_verts.y_pos << " " << current_verts.z_pos << "\n";
@@ -199,20 +218,24 @@ vector<string> extract_model(string current_filepath)
         }
         last_verts_amount += current_tstrip.verts_in_strip;
     }
-    
+
+    // loops through each material
     for (uint32_t i = 0; i < current_gator_header.material_count; i++)
     {
         material_info current_material;
         src_file.clear();
         src_file.seekg(current_gator_header.materials_offset + (sizeof(material_info) * i), ios::beg);
         src_file.read(reinterpret_cast<char*>(&current_material), sizeof(material_info));
-        
+
         if (current_material.texture_name_index > -1)
         {
             size_t last_dot = string_list[current_material.texture_name_index].find_last_of('.');
+            // collects diffuse maps
             new_mtl_file << "newmtl Material" << i << "\nmap_Kd " << string_list[current_material.texture_name_index].substr(0, last_dot) << ".png\n";
+            // assigns alpha texture
             new_mtl_file << "map_d " << string_list[current_material.texture_name_index].substr(0, last_dot) << ".png\n";
         }
+        // checks if the material has a normal map
         if (current_material.normal_map_index > -1)
         {
             size_t last_dot = string_list[current_material.normal_map_index].find_last_of('.');
@@ -223,23 +246,13 @@ vector<string> extract_model(string current_filepath)
             new_mtl_file << "\n";
         }
     }
-    
+    bone_data << "bones = [\n";
     for (uint32_t i = 0; i < current_gator_header.bone_count; i++)
     {
-        struct bones_data
-        {
-            int16_t index, parent_index;
-            uint32_t padding;
-            float value_x, value_y, value_z;
-            float rot_x, rot_y, rot_z, rot_w;
-            float values[11];
-            float pos_x, pos_y, pos_z;
-            float values2[48];
-        };
         bones_data current_bones;
         src_file.seekg(current_gator_header.bones_table + (bone_info_size * i), ios::beg);
         src_file.read(reinterpret_cast<char*>(&current_bones), sizeof(bones_data));
-        
+        /*
         if (current_bones.parent_index < 0)
         {
             bone_data << current_bones.index << " " << string_list[current_bones.index] << " has no parent\n";
@@ -247,10 +260,42 @@ vector<string> extract_model(string current_filepath)
         else
         {
             bone_data << current_bones.index << " " << string_list[current_bones.index] << " connected to " << current_bones.parent_index << " " << string_list[current_bones.parent_index] << "\n";
+        }*/
+        bone_data << "\t{\n\t\t\"name\": \"" << string_list[current_bones.index] << "\",\n";
+        if (current_bones.parent_index < 0)
+        {
+            bone_data << "\t\t\"parent\": \"None,\",\n";
+        }else
+        {
+            bone_data << "\t\t\"parent\": \"" << string_list[current_bones.parent_index] << "\",\n";
         }
+        bone_data << "\t\t\"bind_matrix\": [\n";
+        for (int j = 0; j < 4; ++j) {
+            bone_data << "\t\t\t[";
+            for (int k = 0; k < 4; ++k) {
+                bone_data << std::fixed << std::setprecision(6) << current_bones.bind_matrix[j][k];
+                if (k < 3) bone_data << ",";
+            }
+            bone_data << "]";
+            if (j < 3) bone_data << ",";
+            bone_data << "\n";
+        }
+        bone_data << "\t\t],\n";
+        bone_data << "\t\t\"inverse_bind_matrix\": [\n";
+        for (int j = 0; j < 4; ++j) {
+            bone_data << "\t\t\t[";
+            for (int k = 0; k < 4; ++k) {
+                bone_data << std::fixed << std::setprecision(6) << current_bones.inverse_bind_matrix[j][k];
+                if (k < 3) bone_data << ",";
+            }
+            bone_data << "]";
+            if (j < 3) bone_data << ",";
+            bone_data << "\n";
+        }
+        bone_data << "\t\t]\n\t},\n";
         
-        bone_data << "world position = X: " << current_bones.pos_x << " Y: " << abs(current_bones.pos_y) << " Z: " << current_bones.pos_z << "\n\n";
     }
+    bone_data << "]\n";
 
     bone_data.close();
     src_file.close();
@@ -267,6 +312,12 @@ void m_extractor_loop()
         valid_folders = folder_validation(gator_files_folder) && folder_validation(global_output_path);
         combined_output_path = global_output_path;
         if (!combined_output_path.ends_with("\\"))combined_output_path+="\\";
+    }
+    if (ImGui::TreeNodeEx("Options"))
+    {
+        ImGui::SetItemTooltip("If the UV doesn't appear correctly, try checking this box");
+        ImGui::Checkbox("Use alternative UV", &use_uv2);
+        ImGui::TreePop();
     }
 
     if (valid_folders)
@@ -293,3 +344,4 @@ void m_extractor_loop()
         ImGui::TextColored(ImVec4(1,0,0,1),"Invalid folders");
     }
 }
+

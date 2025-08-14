@@ -185,7 +185,7 @@ vector<char> construct_file_metadata() {
     const unsigned long headers_offset = HOT_HEADER_SIZE + ((METADATA_SIZE * level_list_number) - 8) + filename_table.size();
     const unsigned long previous_data = headers_offset + file_headers_size;
 
-    for (int i = 0; i < level_list_number; i++) {
+    for (unsigned long i = 0; i < level_list_number; i++) {
         string src_path;
         if (level_file_list[i].starts_with("lightmap")) {
             src_path = SOURCE_FILES_PATH+"/lightmaps/";

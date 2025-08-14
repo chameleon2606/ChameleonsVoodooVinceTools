@@ -162,7 +162,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(ProjectDir)libs\x64\glew;$(ProjectDir)libs\x64\glfw;$(ProjectDir)libs\x64\zlib;$(ProjectDir)libs\x64\freeimage</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(ProjectDir)libs\x64\glew;$(ProjectDir)libs\x64\glfw;$(ProjectDir)libs\x64\zlib;$(ProjectDir)libs\x64\freeimage;</AdditionalLibraryDirectories>
       <AdditionalDependencies>opengl32.lib;glfw3.lib;glew32.lib;zlib.lib;FreeImage.lib;$(CoreLibraryDependencies);%(AdditionalDependencies);</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
@@ -180,6 +180,7 @@
     <ClCompile Include="openGL.cpp" />
     <ClCompile Include="repacking.cpp" />
     <ClCompile Include="world_extractor.cpp" />
+    <ClCompile Include="world_repacker.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="level_data.json" />
@@ -252,6 +253,7 @@
     <ClInclude Include="openGL.h" />
     <ClInclude Include="repacking.h" />
     <ClInclude Include="world_extractor.h" />
+    <ClInclude Include="world_repacker.h" />
   </ItemGroup>
   <ItemGroup>
     <Folder Include="output\" />

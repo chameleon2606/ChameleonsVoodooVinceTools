@@ -20,7 +20,7 @@ vector<string> texture_list;
 string sub_e;
 int name_iterations;
 bool textures_extracted_check = true;
-bool png_conversion_check = false;
+bool png_conversion_check = true;
 struct hot_header
 {
     char signature[4];
@@ -151,7 +151,7 @@ void extract_hot_file()
             extract_hot_file();
             
             // remove .hot file after extraction
-            remove((combined_output_path+filename).c_str());
+            if (delete_extracted_file) remove((combined_output_path+filename).c_str());
         }
         // checks if the .gator files should convert into .obj files directly
         if (filename.ends_with(".gator"))
@@ -161,7 +161,7 @@ void extract_hot_file()
             texture_list.insert(texture_list.begin(), tmp_list.begin(), tmp_list.end());
             
             // delete the .gator after we have extracted it
-            remove((combined_output_path+filename).c_str());
+            if (delete_extracted_file) remove((combined_output_path+filename).c_str());
         }
 
         if (filename.ends_with(".dds"))
@@ -252,13 +252,20 @@ static void display_file_tree(const string& path)
 
 void hot_extractor_loop()
 {
+    if (ImGui::TreeNodeEx("Options"))
+    {
+        ImGui::Checkbox("convert .dds files to .png", &png_conversion_check);
+        ImGui::Checkbox("Use alternative UV maps", &use_uv2);
+        ImGui::SetItemTooltip("If textures don't appear correctly on the 3D model, try checking this box");
+        ImGui::Checkbox("delete extracted .hot/.gator files", &delete_extracted_file);
+        ImGui::TreePop();
+    }
     if (ImGui::InputText("Output path", global_output_path, IM_ARRAYSIZE(global_output_path)))
     {
         valid_output_dir = filesystem::exists(global_output_path);
         combined_output_path = global_output_path;
         if (!combined_output_path.ends_with("\\"))combined_output_path+="\\";
     }
-    ImGui::Checkbox("convert dds files to png", &png_conversion_check);
     
     if (!valid_output_dir)
     {
