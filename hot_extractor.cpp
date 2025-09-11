@@ -18,9 +18,12 @@ constexpr uint8_t hot_header_size = 36;
 bool valid_output_dir = false;
 vector<string> texture_list;
 string sub_e;
+string sub_entry;
 int name_iterations;
 bool textures_extracted_check = true;
 bool png_conversion_check = true;
+int is_remastered;
+
 struct hot_header
 {
     char signature[4];
@@ -32,7 +35,7 @@ struct hot_header
     uint32_t file_count;
     uint32_t reserved[2];
 };
-struct file_info
+struct remastered_file_info
 {
     uint32_t header_size;
     uint32_t header_offset;
@@ -44,9 +47,12 @@ struct file_info
     uint32_t reserved2;
 };
 
+
 void init_hot_extractor()
 {
-    
+    valid_output_dir = filesystem::exists(global_output_path);
+    combined_output_path = global_output_path;
+    if (!combined_output_path.ends_with("\\"))combined_output_path+="\\";
 }
 
 void dds_to_png(string& path, string& name)
@@ -67,14 +73,74 @@ void dds_to_png(string& path, string& name)
     FreeImage_DeInitialise();
 }
 
+void bsp_converter(string &bsp_path)
+{
+    struct verts_structure
+    {
+        float pos_x, pos_y, pos_z;
+    };
+    struct strip_structure
+    {
+        uint32_t point1, point2, point3, point4, unknown_value;
+    };
+    struct bsp_header
+    {
+        char signature[4];
+        uint32_t version;
+        uint32_t file_size;
+        uint32_t section_1_entries;
+        uint32_t section_2_entries;
+        uint32_t section_3_entries;
+        uint32_t section_4_entries;
+        uint32_t unknown_value;
+    };
+    bsp_header current_bsp_header;
+    
+    ifstream bsp_file(bsp_path, ios::binary);
+    ofstream hitbox_file(combined_output_path + sub_entry + "_collision.obj");
+
+    bsp_file.read(reinterpret_cast<char*>(&current_bsp_header), sizeof(bsp_header));
+    // seeks to the section of the vertex data
+    bsp_file.seekg((current_bsp_header.section_1_entries * 4 * 4) + (current_bsp_header.section_2_entries * 5 * 4) + sizeof(bsp_header));
+    // collects all vertex positions and writes them to the .obj file
+    for (uint32_t i = 0; i < current_bsp_header.section_3_entries; i++)
+    {
+        verts_structure verts;
+        bsp_file.read(reinterpret_cast<char*>(&verts), sizeof(verts_structure));
+        // flips the x position
+        hitbox_file << "v " << to_string(-verts.pos_x) << " " << to_string(verts.pos_y) << " " << to_string(verts.pos_z) << "\n";
+    }
+    // seeks to the position of the vertex indices
+    bsp_file.seekg((current_bsp_header.section_1_entries * 4 * 4) + sizeof(bsp_header));
+    for (uint32_t i = 0; i < current_bsp_header.section_2_entries; i++)
+    {
+        strip_structure strip;
+        bsp_file.read(reinterpret_cast<char*>(&strip), sizeof(strip_structure));
+        hitbox_file << "f " << to_string(strip.point3+1) << " " << to_string(strip.point2+1) << " " << to_string(strip.point1+1) << "\n";
+    }
+    
+    bsp_file.close();
+    hitbox_file.close();
+    if (delete_extracted_file)
+    {
+        cout << bsp_path << "\n";
+        remove(bsp_path.c_str());
+        if (!remove(bsp_path.c_str()))
+        {
+            cout << bsp_path << " could not be deleted\n";
+        }
+    }
+}
+
 void extract_hot_file()
 {
+    // variables
+    hot_header current_hot_header;
     ifstream src_file(file_to_extract, ios::binary);
     if (!src_file.is_open())
     {
         return;
     }
-    hot_header current_hot_header;
     src_file.clear();
     src_file.seekg(0, ios::beg);
     src_file.read(reinterpret_cast<char*>(&current_hot_header), sizeof(hot_header));
@@ -83,10 +149,10 @@ void extract_hot_file()
     for (uint32_t i = 0; i < current_hot_header.file_count; i++)
     {
         // read the current file info table
-        file_info current_file_info;
+        remastered_file_info current_file_info;
         src_file.clear();   // we have to call this or seeking might not work correctly
-        src_file.seekg(hot_header_size+(sizeof(file_info)*i), ios::beg);
-        src_file.read(reinterpret_cast<char*>(&current_file_info), sizeof(file_info));
+        src_file.seekg(hot_header_size+(sizeof(remastered_file_info)*i), ios::beg);
+        src_file.read(reinterpret_cast<char*>(&current_file_info), sizeof(remastered_file_info));
 
         // read the filename for the current file
         src_file.clear();
@@ -173,7 +239,12 @@ void extract_hot_file()
                 dds_to_png(combined_output_path, filename);
                 remove((combined_output_path+filename).c_str());
             }
-            
+        }
+        if (filename.ends_with(".bsp") && convert_level_bsp)
+        {
+            string bsp_path = combined_output_path+filename;
+            output_file.close();
+            bsp_converter(bsp_path);
         }
         if (output_file.is_open())
         {
@@ -234,6 +305,7 @@ static void display_file_tree(const string& path)
                                     size_t last_slash = file_to_extract.find_last_of('\\');
                                     sub_e = file_to_extract.substr(0, last_slash);
                                     sub_e += "\\textures.hot";
+                                    sub_entry = subentry.path().filename().string();
                                     
                                     thread taskThread(extract_hot_file);
                                     taskThread.join();
@@ -257,7 +329,14 @@ void hot_extractor_loop()
         ImGui::Checkbox("convert .dds files to .png", &png_conversion_check);
         ImGui::Checkbox("Use alternative UV maps", &use_uv2);
         ImGui::SetItemTooltip("If textures don't appear correctly on the 3D model, try checking this box");
-        ImGui::Checkbox("delete extracted .hot/.gator files", &delete_extracted_file);
+        ImGui::Checkbox("delete extracted and converted files", &delete_extracted_file);
+        ImGui::Checkbox("Convert row-major bind matrix to column-major", &matrix_convert);
+        ImGui::SetItemTooltip("DirectX uses row-major matrices, OpenGL (blender) uses col-major");
+        /*
+        ImGui::RadioButton("Remastered", &is_remastered, 0);
+        ImGui::RadioButton("Original", &is_remastered, 1);
+        */
+        ImGui::Checkbox("extract level colliders", &convert_level_bsp);
         ImGui::TreePop();
     }
     if (ImGui::InputText("Output path", global_output_path, IM_ARRAYSIZE(global_output_path)))

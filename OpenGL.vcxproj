@@ -113,7 +113,7 @@
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions);</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>$(ProjectDir)include\x64;$(ProjectDir)include\ImGui;$(ProjectDir)include\zlib;$(ProjectDir)include\FreeImage;$(ProjectDir)include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)include\x64;$(ProjectDir)include\ImGui;$(ProjectDir)include\zlib;$(ProjectDir)include\FreeImage;$(ProjectDir)include\tinygltf;$(ProjectDir)include</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <Link>
@@ -121,6 +121,7 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>$(ProjectDir)libs\x64\glew;$(ProjectDir)libs\x64\glfw;$(ProjectDir)libs\x64\zlib;$(ProjectDir)libs\x64\freeimage</AdditionalLibraryDirectories>
       <AdditionalDependencies>opengl32.lib;glfw3.lib;glew32.lib;zlib.lib;FreeImage.lib;$(CoreLibraryDependencies);%(AdditionalDependencies);</AdditionalDependencies>
+      <EntryPointSymbol></EntryPointSymbol>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -155,7 +156,7 @@
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir)include\x64;$(ProjectDir)include\ImGui;$(ProjectDir)include\zlib;$(ProjectDir)include\FreeImage;$(ProjectDir)include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)include\x64;$(ProjectDir)include\ImGui;$(ProjectDir)include\zlib;$(ProjectDir)include\FreeImage;$(ProjectDir)include\tinygltf;$(ProjectDir)include</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -164,6 +165,7 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>$(ProjectDir)libs\x64\glew;$(ProjectDir)libs\x64\glfw;$(ProjectDir)libs\x64\zlib;$(ProjectDir)libs\x64\freeimage;</AdditionalLibraryDirectories>
       <AdditionalDependencies>opengl32.lib;glfw3.lib;glew32.lib;zlib.lib;FreeImage.lib;$(CoreLibraryDependencies);%(AdditionalDependencies);</AdditionalDependencies>
+      <EntryPointSymbol>mainCRTStartup</EntryPointSymbol>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -180,7 +182,6 @@
     <ClCompile Include="openGL.cpp" />
     <ClCompile Include="repacking.cpp" />
     <ClCompile Include="world_extractor.cpp" />
-    <ClCompile Include="world_repacker.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="level_data.json" />
@@ -240,6 +241,10 @@
     <ClInclude Include="include\ImGui\imstb_textedit.h" />
     <ClInclude Include="include\ImGui\imstb_truetype.h" />
     <ClInclude Include="include\json.hpp" />
+    <ClInclude Include="include\tinygltf\json.hpp" />
+    <ClInclude Include="include\tinygltf\stb_image.h" />
+    <ClInclude Include="include\tinygltf\stb_image_write.h" />
+    <ClInclude Include="include\tinygltf\tiny_gltf.h" />
     <ClInclude Include="include\x64\GLFW\glfw3.h" />
     <ClInclude Include="include\x64\GLFW\glfw3native.h" />
     <ClInclude Include="include\x64\GL\eglew.h" />
@@ -253,7 +258,6 @@
     <ClInclude Include="openGL.h" />
     <ClInclude Include="repacking.h" />
     <ClInclude Include="world_extractor.h" />
-    <ClInclude Include="world_repacker.h" />
   </ItemGroup>
   <ItemGroup>
     <Folder Include="output\" />

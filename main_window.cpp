@@ -30,12 +30,12 @@ void main_loop()
     
     ImGui::BeginTabBar("Chameleon's toolbox");
     {
-        /*
+        
         if (ImGui::BeginTabItem("world"))
         {
             world_extractor_loop();
             ImGui::EndTabItem();
-        }*/
+        }
         if (ImGui::BeginTabItem("Resource extractor"))
         {
             hot_extractor_loop();
@@ -45,12 +45,17 @@ void main_loop()
         {
             repack_loop();
             ImGui::EndTabItem();
-        }/*
+        }
         if (ImGui::BeginTabItem("Model extractor"))
         {
             m_extractor_loop();
             ImGui::EndTabItem();
-        }*/
+        }
         ImGui::EndTabBar();
+    }
+
+    if (ImGui::Button("test gltf"))
+    {
+        //test_gltf_function();
     }
 }
