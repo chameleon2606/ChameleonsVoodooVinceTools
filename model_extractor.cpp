@@ -121,11 +121,6 @@ vector<string> extract_model(string current_filepath)
     nlohmann::json asset;
     gltf_data["asset"]["version"] = "2.0";
     
-    nlohmann::json sampler;
-    sampler["magFilter"] = 9728;
-    sampler["minFilter"] = 9728;
-    gltf_data["samplers"].push_back(sampler);
-    
     gator_header current_gator_header;
     
     // reads the header (128 bits)
@@ -606,7 +601,35 @@ vector<string> extract_model(string current_filepath)
     buffer["byteLength"] = current_bin_size;
     buffer["uri"] = current_filename + ".bin";
     gltf_data["buffers"].push_back(buffer);
+
+    nlohmann::json sampler;
+    sampler["magFilter"] = 9728;
+    sampler["minFilter"] = 9728;
+    gltf_data["samplers"].push_back(sampler);
     
+    if (!texture_list.empty())
+    {        
+        for (size_t i = 0; i < texture_list.size(); i++)
+        {
+            last_dot = texture_list[i].find_last_of('.');
+            
+            if (current_filename == "curio_base")
+            {
+                cout << texture_list[i] << "\n";
+            }
+            
+            nlohmann::json texture;
+            texture["sampler"]=0;
+            texture["source"]= i;
+            gltf_data["textures"].push_back(texture);
+            
+            nlohmann::json image;
+            image["mimeType"] = "image/png";
+            image["name"] = texture_list[i].substr(0, last_dot);
+            image["uri"] = texture_list[i].substr(0, last_dot)+".png";
+            gltf_data["images"].push_back(image);
+        }
+    }
     
     // loops through each material
     for (uint32_t i = 0; i < current_gator_header.material_count; i++)
@@ -618,34 +641,27 @@ vector<string> extract_model(string current_filepath)
 
         nlohmann::json material;
         material["doubleSided"] = false;
-        material["name"] = "Material"+to_string(i);
+        material["name"] = "Material_"+to_string(i);
         material["pbrMetallicRoughness"]["metallicFactor"] = 0;
         material["pbrMetallicRoughness"]["roughnessFactor"] = 1;
-        for (int j = 0; j < texture_list.size(); j++)
+        // looks for texture in texture list and applies it's index to the material
+        if (current_material.texture_name_index >= 0)
         {
-            if (string_list[current_material.texture_name_index] == texture_list[j])
+            for (size_t j = 0; j < texture_list.size(); j++)
             {
-                material["pbrMetallicRoughness"]["baseColorTexture"]["index"] = j;
-                break;
+                if (string_list[current_material.texture_name_index] == texture_list[j])
+                {
+                    material["pbrMetallicRoughness"]["baseColorTexture"]["index"] = j;
+                    break;
+                }
             }
         }
+        
         gltf_data["materials"].push_back(material);
 
         if (current_material.texture_name_index > -1)
         {
             size_t last_dot = string_list[current_material.texture_name_index].find_last_of('.');
-            
-            nlohmann::json texture;
-            texture["sampler"]=0;
-            texture["source"]= i;
-            gltf_data["textures"].push_back(texture);
-        
-            nlohmann::json image;
-            image["mimeType"] = "image/png";
-            image["name"] = string_list[current_material.texture_name_index].substr(0, last_dot);
-            image["uri"] = string_list[current_material.texture_name_index].substr(0, last_dot)+".png";
-            
-            gltf_data["images"].push_back(image);
             
             // collects diffuse maps
             new_mtl_file << "newmtl Material" << i << "\nmap_Kd " << string_list[current_material.texture_name_index].substr(0, last_dot) << ".png\n";
@@ -664,16 +680,6 @@ vector<string> extract_model(string current_filepath)
         }
     }
     gltf_data["meshes"].push_back(meshes);
-    
-
-    //nlohmann::json mesh_node;
-    //mesh_node["name"] = current_filename;
-    //mesh_node["mesh"] = 0;
-    //if (current_gator_header.bone_count > 1)
-    //{
-    //    mesh_node["skin"] = 0;
-    //}
-    //gltf_data["nodes"].push_back(mesh_node);
     
 
     gltf_file << setw(4) << gltf_data;
