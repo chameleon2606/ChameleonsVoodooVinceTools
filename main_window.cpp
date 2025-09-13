@@ -53,9 +53,4 @@ void main_loop()
         }
         ImGui::EndTabBar();
     }
-
-    if (ImGui::Button("test gltf"))
-    {
-        //test_gltf_function();
-    }
 }

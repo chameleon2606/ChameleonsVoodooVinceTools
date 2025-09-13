@@ -26,6 +26,7 @@ constexpr uint8_t vertex_pos_index = 0;
 constexpr uint8_t normals_index = 1;
 constexpr uint8_t uvs_index = 2;
 constexpr uint8_t vertex_indices_index = 1;
+const vector<float>default_matrix = {1.0,0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,1.0};
 struct gator_header
 {
     char magic[4];
@@ -90,8 +91,15 @@ void init_model_extractor()
 
 vector<string> extract_model(string current_filepath)
 {
-    int accessor_count = 0;
-    int buffer_view_count = 0;
+    uint16_t accessor_count = 0;
+    uint16_t buffer_view_count = 0;
+
+    uint16_t vertex_position_index = 0;
+    uint16_t normals_index = 0;
+    uint16_t texcoord_index = 0;
+    uint16_t indices_index = 0;
+    uint16_t weights_index = 0;
+    uint16_t bone_indices_index = 0;
     
     string gator_string = gator_files_folder;
     size_t last_slash = current_filepath.find_last_of('\\');
@@ -109,9 +117,14 @@ vector<string> extract_model(string current_filepath)
 
     nlohmann::json gltf_data;
     gltf_data["nodes"] = nlohmann::json::array();
+    
     nlohmann::json asset;
-    gltf_data["asset"]["generator"] = "Khronos glTF Blender I/O v4.5.47";
     gltf_data["asset"]["version"] = "2.0";
+    
+    nlohmann::json sampler;
+    sampler["magFilter"] = 9728;
+    sampler["minFilter"] = 9728;
+    gltf_data["samplers"].push_back(sampler);
     
     gator_header current_gator_header;
     
@@ -149,28 +162,21 @@ vector<string> extract_model(string current_filepath)
     gltf_data["scene"] = 0;
     nlohmann::json scene;
     scene["name"] = "Scene";
-    scene["nodes"] = {1};
+    if (current_gator_header.bone_count > 1)
+    {
+        scene["nodes"] = {0,1};
+    }
+    else
+    {
+        scene["nodes"] = {0};
+    }
     gltf_data["scenes"].push_back(scene);
 
-    
-    nlohmann::json rig_accessor;
-    rig_accessor["bufferView"] = buffer_view_count;
-    rig_accessor["componentType"] = 5126;
-    rig_accessor["count"] = current_gator_header.bone_count;
-    rig_accessor["type"] = "MAT4";
-    gltf_data["accessors"].push_back(rig_accessor);
-    accessor_count++;
-
-    uint32_t current_bin_size = bin_file.tellp();
-    
-    nlohmann::json rig_buffer_views;
-    rig_buffer_views["byteLength"] = 16*current_gator_header.bone_count*sizeof(float);
-    rig_buffer_views["buffer"] = 0;
-    rig_buffer_views["byteOffset"] = current_bin_size;
-    gltf_data["bufferViews"].push_back(rig_buffer_views);
-    buffer_view_count++;
+    uint32_t current_bin_size = 0;
 
     // collects bone data
+    
+    // loops through bones to collect all parents data
     vector<int16_t> bone_parent_list;
     for (uint32_t i = 0; i < current_gator_header.bone_count; i++)
     {
@@ -178,40 +184,46 @@ vector<string> extract_model(string current_filepath)
         src_file.clear();
         src_file.seekg(current_gator_header.bones_table + (bone_info_size * i), ios::beg);
         src_file.read(reinterpret_cast<char*>(&current_bone), sizeof(bones_data));
-        bone_parent_list.push_back(current_bone.parent_index);
         
-        // read binary data
-        src_file.clear();
-        src_file.seekg(current_gator_header.bones_table + (bone_info_size * i) + 96, ios::beg);
-        vector<char>matrix_buffer(16*sizeof(float));
-        src_file.read(matrix_buffer.data(), matrix_buffer.size());
-        streamsize bytes_read = src_file.gcount();
-        bin_file.write(matrix_buffer.data(), bytes_read);
+        bone_parent_list.push_back(current_bone.parent_index);
     }
-    
+
+    // loops though bones again to collect all bone data
+    vector<float>bind_matrix_list;
     for (uint32_t i = 0; i < current_gator_header.bone_count; i++)
     {
+        vector<float>pose_positions;
+        
         bones_data current_bone;
         
         // go back and read data into the "current_bone" struct
         src_file.clear();
         src_file.seekg(current_gator_header.bones_table + (bone_info_size * i), ios::beg);
         src_file.read(reinterpret_cast<char*>(&current_bone), sizeof(bones_data));
-
-        vector<float>bind_matrix_list;
+        
         for (int row = 0; row < 4; ++row) {
             for (int col = 0; col < 4; ++col) {
+                // matrix list for binary data
                 bind_matrix_list.push_back(current_bone.inverse_bind_matrix[row][col]);
+                // matrix list for gltf file
+                pose_positions.push_back(current_bone.bind_matrix[row][col]);
             }
         }
-        
+            
         nlohmann::json bone;
         bone["name"] = string_list[current_bone.index];
-        bone["matrix"] = bind_matrix_list;
-        vector<int16_t> bone_children_list;
-        if (string_list[current_bone.index] == "main")
+        if (pose_positions != default_matrix)
         {
-            bone_children_list.push_back(current_gator_header.bone_count);
+            bone["matrix"] = pose_positions;
+        }
+        vector<int16_t> bone_children_list;
+        if (string_list[current_bone.index] == "identity")
+        {
+            bone["mesh"] = 0;
+            if (current_gator_header.bone_count > 1)
+            {
+                bone["skin"] = 0;
+            }
         }
         for (uint32_t k = 0; k < bone_parent_list.size(); k++)
         {
@@ -225,17 +237,34 @@ vector<string> extract_model(string current_filepath)
             bone["children"] = bone_children_list;
         }
         gltf_data["nodes"].push_back(bone);
-        
     }
 
-    if (current_gator_header.bone_joints_offset == 0)
-    {
-        vector<int16_t> bone_joints_list;
-        for (uint32_t i = 0; i < current_gator_header.bone_count; i++)
-        {
-            bone_joints_list.push_back(i);
-        }
+    nlohmann::json rig_accessor;
+    rig_accessor["bufferView"] = buffer_view_count;
+    rig_accessor["componentType"] = 5126;
+    rig_accessor["count"] = current_gator_header.bone_count;
+    rig_accessor["type"] = "MAT4";
+    gltf_data["accessors"].push_back(rig_accessor);
+    accessor_count++;
+
+    current_bin_size = bin_file.tellp();
+    bin_file.write(reinterpret_cast<const char*>(bind_matrix_list.data()),bind_matrix_list.size() * sizeof(float));
+    
+    nlohmann::json rig_buffer_views;
+    rig_buffer_views["byteLength"] = current_gator_header.bone_count*16*sizeof(float);
+    rig_buffer_views["buffer"] = 0;
+    rig_buffer_views["byteOffset"] = current_bin_size;
+    gltf_data["bufferViews"].push_back(rig_buffer_views);
+    buffer_view_count++;
         
+    vector<int16_t> bone_joints_list;
+    for (uint32_t i = 0; i < current_gator_header.bone_count; i++)
+    {
+        bone_joints_list.push_back(i);
+    }
+
+    if (current_gator_header.bone_count > 1)
+    {
         nlohmann::json skin;
         skin["inverseBindMatrices"] = 0;
         skin["joints"] = bone_joints_list;
@@ -341,43 +370,48 @@ vector<string> extract_model(string current_filepath)
 
     current_bin_size = bin_file.tellp();
 
-    // JOINTS
-    nlohmann::json joints_accessor;
-    joints_accessor["bufferView"] = buffer_view_count;
-    joints_accessor["componentType"] = 5121;
-    joints_accessor["count"] = current_gator_header.vert_count;
-    joints_accessor["type"] = "VEC4";
-    gltf_data["accessors"].push_back(joints_accessor);
-    accessor_count++;
+    if (current_gator_header.bone_count > 1)
+    {
+        // JOINTS
+        nlohmann::json joints_accessor;
+        joints_accessor["bufferView"] = buffer_view_count;
+        joints_accessor["componentType"] = 5121;
+        joints_accessor["count"] = current_gator_header.vert_count;
+        joints_accessor["type"] = "VEC4";
+        gltf_data["accessors"].push_back(joints_accessor);
+        bone_indices_index = accessor_count;
+        accessor_count++;
 
-    nlohmann::json joints_buffer_views;
-    joints_buffer_views["byteLength"] = current_gator_header.vert_count * 4;
-    joints_buffer_views["buffer"] = 0;
-    joints_buffer_views["byteOffset"] = current_bin_size;
-    joints_buffer_views["target"] = 34962;
-    gltf_data["bufferViews"].push_back(joints_buffer_views);
-    bin_file.write(reinterpret_cast<const char*>(joints.data()),joints.size() * sizeof(uint8_t));
-    buffer_view_count++;
+        nlohmann::json joints_buffer_views;
+        joints_buffer_views["byteLength"] = current_gator_header.vert_count * 4;
+        joints_buffer_views["buffer"] = 0;
+        joints_buffer_views["byteOffset"] = current_bin_size;
+        joints_buffer_views["target"] = 34962;
+        gltf_data["bufferViews"].push_back(joints_buffer_views);
+        bin_file.write(reinterpret_cast<const char*>(joints.data()),joints.size() * sizeof(uint8_t));
+        buffer_view_count++;
 
-    // WEIGHTS
-    nlohmann::json weights_accessor;
-    weights_accessor["bufferView"] = buffer_view_count;
-    weights_accessor["componentType"] = 5126;
-    weights_accessor["count"] = current_gator_header.vert_count;
-    weights_accessor["type"] = "VEC4";
-    gltf_data["accessors"].push_back(weights_accessor);
-    accessor_count++;
+        // WEIGHTS
+        nlohmann::json weights_accessor;
+        weights_accessor["bufferView"] = buffer_view_count;
+        weights_accessor["componentType"] = 5126;
+        weights_accessor["count"] = current_gator_header.vert_count;
+        weights_accessor["type"] = "VEC4";
+        gltf_data["accessors"].push_back(weights_accessor);
+        weights_index = accessor_count;
+        accessor_count++;
 
-    current_bin_size = bin_file.tellp();
+        current_bin_size = bin_file.tellp();
 
-    nlohmann::json weights_buffer_views;
-    weights_buffer_views["byteLength"] = current_gator_header.vert_count*4*sizeof(float);
-    weights_buffer_views["buffer"] = 0;
-    weights_buffer_views["byteOffset"] = current_bin_size;
-    weights_buffer_views["target"] = 34962;
-    gltf_data["bufferViews"].push_back(weights_buffer_views);
-    bin_file.write(reinterpret_cast<const char*>(weights.data()),weights.size() * sizeof(float));
-    buffer_view_count++;
+        nlohmann::json weights_buffer_views;
+        weights_buffer_views["byteLength"] = current_gator_header.vert_count*4*sizeof(float);
+        weights_buffer_views["buffer"] = 0;
+        weights_buffer_views["byteOffset"] = current_bin_size;
+        weights_buffer_views["target"] = 34962;
+        gltf_data["bufferViews"].push_back(weights_buffer_views);
+        bin_file.write(reinterpret_cast<const char*>(weights.data()),weights.size() * sizeof(float));
+        buffer_view_count++;
+    }
 
     // POSITIONS
     current_bin_size = bin_file.tellp();
@@ -389,6 +423,7 @@ vector<string> extract_model(string current_filepath)
     vertex_pos_accessor["min"] = {min_x,min_y,min_z};
     vertex_pos_accessor["type"] = "VEC3";
     gltf_data["accessors"].push_back(vertex_pos_accessor);
+    vertex_position_index = accessor_count;
     accessor_count++;
 
     nlohmann::json vertex_pos_buffer_views;
@@ -408,6 +443,7 @@ vector<string> extract_model(string current_filepath)
     norms_accessor["count"] = current_gator_header.vert_count;
     norms_accessor["type"] = "VEC3";
     gltf_data["accessors"].push_back(norms_accessor);
+    normals_index = accessor_count;
     accessor_count++;
     
     nlohmann::json norms_buffer_views;
@@ -427,6 +463,7 @@ vector<string> extract_model(string current_filepath)
     uv_accessor["count"] = current_gator_header.vert_count;
     uv_accessor["type"] = "VEC2";
     gltf_data["accessors"].push_back(uv_accessor);
+    texcoord_index = accessor_count;
     accessor_count++;
     
     nlohmann::json uv_buffer_views;
@@ -459,6 +496,8 @@ vector<string> extract_model(string current_filepath)
     nlohmann::json meshes;
     meshes["name"] = current_filename;
     nlohmann::json primitives;
+
+    indices_index = accessor_count;
     
     // loops through the face strips and writes the tstrips
     for (uint32_t i = 0; i < current_gator_header.tstrip_count; i++)
@@ -492,8 +531,6 @@ vector<string> extract_model(string current_filepath)
         
         // creates vertex groups for the .obj file
         new_obj_file << "\ng " << current_tstrip.verts_in_strip << "\nusemtl Material" << current_tstrip.material_index << "\n\n";
-
-        int last_index = 0;
         
         int vert_indices = 0;
         vector<uint16_t>vertex_indices;
@@ -522,11 +559,14 @@ vector<string> extract_model(string current_filepath)
             vert_indices+=3;
         }
 
-        primitives["attributes"]["JOINTS_0"] = 1;
-        primitives["attributes"]["WEIGHTS_0"] = 2;
-        primitives["attributes"]["POSITION"] = 3;
-        primitives["attributes"]["NORMAL"] = 4;
-        primitives["attributes"]["TEXCOORD_0"] = 5;
+        if (current_gator_header.bone_count > 1)
+        {
+            primitives["attributes"]["JOINTS_0"] = bone_indices_index;
+            primitives["attributes"]["WEIGHTS_0"] = weights_index;
+        }
+        primitives["attributes"]["POSITION"] = vertex_position_index;
+        primitives["attributes"]["NORMAL"] = normals_index;
+        primitives["attributes"]["TEXCOORD_0"] = texcoord_index;
         
         nlohmann::json index_accessor;
         index_accessor["bufferView"] = buffer_view_count;
@@ -534,8 +574,9 @@ vector<string> extract_model(string current_filepath)
         index_accessor["count"] = vert_indices;
         index_accessor["type"] = "SCALAR";
         gltf_data["accessors"].push_back(index_accessor);
-        primitives["indices"] = 6+i;
         accessor_count++;
+        primitives["indices"] = indices_index+i;
+        primitives["material"] = current_tstrip.material_index;
 
         long long current_bin_size = bin_file.tellp();
         bin_file.write(reinterpret_cast<const char*>(vertex_indices.data()),vertex_indices.size() * sizeof(uint16_t));
@@ -549,8 +590,6 @@ vector<string> extract_model(string current_filepath)
         meshes["primitives"].push_back(primitives);
         buffer_view_count++;
         
-        //vertex_index_reference = last_index;
-        
         last_verts_amount += current_tstrip.verts_in_strip;
     }
 
@@ -560,7 +599,6 @@ vector<string> extract_model(string current_filepath)
     }
     
     current_bin_size = bin_file.tellp();
-    // size of buffer file
     bin_file.seekp(0, ios::end);
     current_bin_size = bin_file.tellp();
     
@@ -569,7 +607,7 @@ vector<string> extract_model(string current_filepath)
     buffer["uri"] = current_filename + ".bin";
     gltf_data["buffers"].push_back(buffer);
     
-
+    
     // loops through each material
     for (uint32_t i = 0; i < current_gator_header.material_count; i++)
     {
@@ -578,9 +616,37 @@ vector<string> extract_model(string current_filepath)
         src_file.seekg(current_gator_header.materials_offset + (sizeof(material_info) * i), ios::beg);
         src_file.read(reinterpret_cast<char*>(&current_material), sizeof(material_info));
 
+        nlohmann::json material;
+        material["doubleSided"] = false;
+        material["name"] = "Material"+to_string(i);
+        material["pbrMetallicRoughness"]["metallicFactor"] = 0;
+        material["pbrMetallicRoughness"]["roughnessFactor"] = 1;
+        for (int j = 0; j < texture_list.size(); j++)
+        {
+            if (string_list[current_material.texture_name_index] == texture_list[j])
+            {
+                material["pbrMetallicRoughness"]["baseColorTexture"]["index"] = j;
+                break;
+            }
+        }
+        gltf_data["materials"].push_back(material);
+
         if (current_material.texture_name_index > -1)
         {
             size_t last_dot = string_list[current_material.texture_name_index].find_last_of('.');
+            
+            nlohmann::json texture;
+            texture["sampler"]=0;
+            texture["source"]= i;
+            gltf_data["textures"].push_back(texture);
+        
+            nlohmann::json image;
+            image["mimeType"] = "image/png";
+            image["name"] = string_list[current_material.texture_name_index].substr(0, last_dot);
+            image["uri"] = string_list[current_material.texture_name_index].substr(0, last_dot)+".png";
+            
+            gltf_data["images"].push_back(image);
+            
             // collects diffuse maps
             new_mtl_file << "newmtl Material" << i << "\nmap_Kd " << string_list[current_material.texture_name_index].substr(0, last_dot) << ".png\n";
             // assigns alpha texture
@@ -597,14 +663,17 @@ vector<string> extract_model(string current_filepath)
             new_mtl_file << "\n";
         }
     }
-    
     gltf_data["meshes"].push_back(meshes);
+    
 
-    nlohmann::json mesh_node;
-    mesh_node["name"] = current_filename;
-    mesh_node["mesh"] = 0;
-    mesh_node["skin"] = 0;
-    gltf_data["nodes"].push_back(mesh_node);
+    //nlohmann::json mesh_node;
+    //mesh_node["name"] = current_filename;
+    //mesh_node["mesh"] = 0;
+    //if (current_gator_header.bone_count > 1)
+    //{
+    //    mesh_node["skin"] = 0;
+    //}
+    //gltf_data["nodes"].push_back(mesh_node);
     
 
     gltf_file << setw(4) << gltf_data;
