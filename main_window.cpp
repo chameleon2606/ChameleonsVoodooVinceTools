@@ -30,15 +30,14 @@ void main_loop()
     
     ImGui::BeginTabBar("Chameleon's toolbox");
     {
-        
-        if (ImGui::BeginTabItem("world"))
-        {
-            world_extractor_loop();
-            ImGui::EndTabItem();
-        }
         if (ImGui::BeginTabItem("Resource extractor"))
         {
             hot_extractor_loop();
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("world"))
+        {
+            world_extractor_loop();
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Repacker"))
