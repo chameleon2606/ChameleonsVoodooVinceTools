@@ -11,5 +11,6 @@ inline bool use_uv2 = false;
 inline bool delete_extracted_file = true;
 inline bool matrix_convert = true;
 inline bool convert_level_bsp = true;
+inline bool model_compression = true;
 void init_main();
 void main_loop();

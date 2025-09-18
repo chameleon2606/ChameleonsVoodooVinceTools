@@ -6,7 +6,6 @@
 #include <iostream>
 #include "openGL.h"
 #include "repacking.h"
-#include "model_extractor.h"
 #include "hot_extractor.h"
 #include "main_window.h"
 #define STB_IMAGE_IMPLEMENTATION
@@ -95,7 +94,6 @@ int main(void)
 
     init_main();
     init_repacker();
-    init_model_extractor();
     init_hot_extractor();
     
     while(!glfwWindowShouldClose(window))

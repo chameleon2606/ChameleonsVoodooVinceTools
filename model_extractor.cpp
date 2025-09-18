@@ -58,14 +58,15 @@ struct material_info
 };
 struct bones_data
 {
-    int16_t index, parent_index;
+    uint16_t index;
+    int16_t parent_index;
     uint32_t padding;
     float value_x, value_y, value_z;
     float rot_x, rot_y, rot_z;
-    float bind_matrix[4][4];
-    float inverse_bind_matrix[4][4];
-    float bind_matrix_2[4][4];
-    float inverse_bind_matrix_2[4][4];
+    float rest_pose_matrix[4][4];
+    float bind_pose_matrix[4][4];
+    float matrix_3[4][4];
+    float matrix_4[4][4];
 };
 
 bool folder_validation(char folder[])
@@ -105,9 +106,6 @@ vector<string> extract_model(string current_filepath)
 
     // creates a new .obj file with the name of the gator file
     ifstream src_file(current_filepath, ios::binary);                                                      // input .gator file
-    ofstream new_obj_file(combined_output_path + "\\" + current_filename + ".obj", ios::trunc);        // output .obj file
-    new_obj_file << "mtllib " << current_filename << ".mtl\n\n";
-    ofstream new_mtl_file(combined_output_path + "\\" + current_filename + ".mtl", ios::trunc);        // output material file
     ofstream gltf_file(combined_output_path+"\\"+current_filename + ".gltf", ios::trunc);
     ofstream bin_file(combined_output_path+"\\"+current_filename + ".bin", ios::binary | ios::trunc);
 
@@ -116,6 +114,7 @@ vector<string> extract_model(string current_filepath)
     
     nlohmann::json asset;
     gltf_data["asset"]["version"] = "2.0";
+    gltf_data["asset"]["generator"] = "chameleon's voodoo tools";
     
     gator_header current_gator_header;
     
@@ -149,6 +148,7 @@ vector<string> extract_model(string current_filepath)
         }
         string_list.push_back(texturename);
     }
+    
 
     gltf_data["scene"] = 0;
     nlohmann::json scene;
@@ -168,6 +168,7 @@ vector<string> extract_model(string current_filepath)
     // collects bone data
     
     // loops through bones to collect all parents data
+    vector<bones_data> bones;
     vector<int16_t> bone_parent_list;
     for (uint32_t i = 0; i < current_gator_header.bone_count; i++)
     {
@@ -176,40 +177,34 @@ vector<string> extract_model(string current_filepath)
         src_file.seekg(current_gator_header.bones_table + (bone_info_size * i), ios::beg);
         src_file.read(reinterpret_cast<char*>(&current_bone), sizeof(bones_data));
         
+        bones.push_back(current_bone);
         bone_parent_list.push_back(current_bone.parent_index);
     }
 
     // loops though bones again to collect all bone data
     vector<float>bind_matrix_list;
-    for (uint32_t i = 0; i < current_gator_header.bone_count; i++)
+    for (uint32_t i = 0; i < bones.size(); i++)
     {
         vector<float>pose_positions;
         
-        bones_data current_bone;
-        
-        // go back and read data into the "current_bone" struct
-        src_file.clear();
-        src_file.seekg(current_gator_header.bones_table + (bone_info_size * i), ios::beg);
-        src_file.read(reinterpret_cast<char*>(&current_bone), sizeof(bones_data));
-        
         for (int row = 0; row < 4; ++row) {
             for (int col = 0; col < 4; ++col) {
-                // matrix list for binary data
-                bind_matrix_list.push_back(current_bone.inverse_bind_matrix[row][col]);
-                // matrix list for gltf file
-                pose_positions.push_back(current_bone.inverse_bind_matrix_2[row][col] * current_bone.inverse_bind_matrix[col][row]);
                 
+                // matrix list for binary data
+                bind_matrix_list.push_back(bones[i].bind_pose_matrix[row][col]);
+                // matrix list for gltf file
+                pose_positions.push_back(bones[i].rest_pose_matrix[row][col]);
             }
         }
         
         nlohmann::json bone;
-        bone["name"] = string_list[current_bone.index];
+        bone["name"] = string_list[bones[i].index];
         if (pose_positions != default_matrix)
         {
             bone["matrix"] = pose_positions;
         }
         vector<int16_t> bone_children_list;
-        if (string_list[current_bone.index] == "identity")
+        if (i == 0)
         {
             bone["mesh"] = 0;
             if (current_gator_header.bone_count > 1)
@@ -219,7 +214,7 @@ vector<string> extract_model(string current_filepath)
         }
         for (uint32_t k = 0; k < bone_parent_list.size(); k++)
         {
-            if (bone_parent_list[k] == current_bone.index)
+            if (bone_parent_list[k] == bones[i].index)
             {
                 bone_children_list.push_back(k);
             }
@@ -236,7 +231,7 @@ vector<string> extract_model(string current_filepath)
         nlohmann::json rig_accessor;
         rig_accessor["bufferView"] = buffer_view_count;
         rig_accessor["componentType"] = 5126;
-        rig_accessor["count"] = current_gator_header.bone_count;
+        rig_accessor["count"] = bones.size();
         rig_accessor["type"] = "MAT4";
         gltf_data["accessors"].push_back(rig_accessor);
         accessor_count++;
@@ -245,7 +240,7 @@ vector<string> extract_model(string current_filepath)
         bin_file.write(reinterpret_cast<const char*>(bind_matrix_list.data()),bind_matrix_list.size() * sizeof(float));
         
         nlohmann::json rig_buffer_views;
-        rig_buffer_views["byteLength"] = current_gator_header.bone_count*16*sizeof(float);
+        rig_buffer_views["byteLength"] = bones.size()*16*sizeof(float);
         rig_buffer_views["buffer"] = 0;
         rig_buffer_views["byteOffset"] = current_bin_size;
         gltf_data["bufferViews"].push_back(rig_buffer_views);
@@ -253,7 +248,7 @@ vector<string> extract_model(string current_filepath)
     }
         
     vector<int16_t> bone_joints_list;
-    for (uint32_t i = 0; i < current_gator_header.bone_count; i++)
+    for (uint32_t i = 0; i < bones.size(); i++)
     {
         bone_joints_list.push_back(i);
     }
@@ -306,11 +301,11 @@ vector<string> extract_model(string current_filepath)
         weights.push_back(current_verts.bone3_weight);
         weights.push_back(current_verts.bone4_weight);
 
-        vertex_positions.push_back(-current_verts.x_pos);
+        vertex_positions.push_back(current_verts.x_pos);
         vertex_positions.push_back(current_verts.y_pos);
         vertex_positions.push_back(current_verts.z_pos);
 
-        normals.push_back(-current_verts.x_norm);
+        normals.push_back(current_verts.x_norm);
         normals.push_back(current_verts.y_norm);
         normals.push_back(current_verts.z_norm);
 
@@ -351,12 +346,9 @@ vector<string> extract_model(string current_filepath)
             copy(tmp_uv_buffer.begin(), tmp_uv_buffer.end(), back_inserter(uv_buffer));
         }
 
-        //writes x, y and z position of vertex into the .obj file and flips the x-axis
-        new_obj_file << "v " << current_verts.x_pos*-1 << " " << current_verts.y_pos << " " << current_verts.z_pos << "\n";
-
         // the gltf file wants min and max position values
-        if (-current_verts.x_pos > max_x)max_x = -current_verts.x_pos;
-        else if (-current_verts.x_pos < min_x)min_x = -current_verts.x_pos;
+        if (current_verts.x_pos > max_x)max_x = current_verts.x_pos;
+        else if (current_verts.x_pos < min_x)min_x = current_verts.x_pos;
         if (current_verts.y_pos > max_y)max_y = current_verts.y_pos;
         else if (current_verts.y_pos < min_y)min_y = current_verts.y_pos;
         if (current_verts.z_pos > max_z)max_z = current_verts.z_pos;
@@ -474,20 +466,6 @@ vector<string> extract_model(string current_filepath)
         buffer_view_count++;
     }
     
-    // loops through the UV list and writes them into the .obj file
-    for (auto& uv : uvs)
-    {
-        new_obj_file << "vt " << uv[0] << " " << uv[1] << "\n";
-        
-    }
-    // loops through the normals list and writes them into the .obj file
-    for (auto& normal : norms)
-    {
-        // x-axis is flipped, because the x-axis of the vertex position was flipped
-        new_obj_file << "vn " << normal[0]*-1 << " " << normal[1] << " " << normal[2] << "\n";
-    }
-
-    
     // reference to the next offset of vert strips
     int last_verts_amount = 0;
     vector<char>new_idx;
@@ -529,9 +507,6 @@ vector<string> extract_model(string current_filepath)
         vector<uint16_t> strip(current_tstrip.verts_in_strip);
         src_file.read(reinterpret_cast<char*>(strip.data()), current_tstrip.verts_in_strip * sizeof(uint16_t));
         
-        // creates vertex groups for the .obj file
-        new_obj_file << "\ng " << current_tstrip.verts_in_strip << "\nusemtl Material" << current_tstrip.material_index << "\n\n";
-        
         int vert_indices = 0;
         vector<uint16_t>vertex_indices;
 
@@ -541,33 +516,30 @@ vector<string> extract_model(string current_filepath)
             uint16_t f1 = strip[k + 0];
             uint16_t f2 = strip[k + 1];
             uint16_t f3 = strip[k + 2];
+
+            if (f1 != f2 && f1 != f3 && f2 != f3)
+            {
+                if (k & 1)
+                {
+                    // makes sure every index is different before pushing it to the list
+                    vertex_indices.push_back(f3);
+                    vert_indices++;
+                    vertex_indices.push_back(f2);
+                    vert_indices++;
+                    vertex_indices.push_back(f1);
+                    vert_indices++;
+                }
+                else
+                {
+                    vertex_indices.push_back(f3);
+                    vert_indices++;
+                    vertex_indices.push_back(f1);
+                    vert_indices++;
+                    vertex_indices.push_back(f2);
+                    vert_indices++;
+                }
+            }
             
-            if (k & 1)
-            {
-                new_obj_file << "f " << f1+1 << "/" << f1+1 << "/" << f1+1 << " " << f2+1 << "/" << f2+1 << "/" << f2+1 << " " << f3+1 << "/" << f3+1 << "/" << f3+1 << "\n";
-                // makes sure every index is different before pushing it to the list
-                if (f1 != f2 && f1 != f3 && f2 != f3)
-                {
-                    vertex_indices.push_back(f1);
-                    vertex_indices.push_back(f2);
-                    vertex_indices.push_back(f3);
-
-                    vert_indices+=3;
-                }
-                
-            }
-            else
-            {
-                new_obj_file << "f " << f2+1 << "/" << f2+1 << "/" << f2+1 << " " << f1+1 << "/" << f1+1 << "/" << f1+1 << " " << f3+1 << "/" << f3+1 << "/" << f3+1 << "\n";
-                if (f1 != f2 && f1 != f3 && f2 != f3)
-                {
-                    vertex_indices.push_back(f2);
-                    vertex_indices.push_back(f1);
-                    vertex_indices.push_back(f3);
-
-                    vert_indices+=3;
-                }
-            }
         }
         
         if (current_gator_header.bone_count > 1)
@@ -678,35 +650,12 @@ vector<string> extract_model(string current_filepath)
         }
         
         gltf_data["materials"].push_back(material);
-
-        if (current_material.texture_name_index > -1)
-        {
-            size_t last_dot = string_list[current_material.texture_name_index].find_last_of('.');
-            
-            // collects diffuse maps
-            new_mtl_file << "newmtl Material" << i << "\nmap_Kd " << string_list[current_material.texture_name_index].substr(0, last_dot) << ".png\n";
-            // assigns alpha texture
-            new_mtl_file << "map_d " << string_list[current_material.texture_name_index].substr(0, last_dot) << ".png\n";
-        }
-        // checks if the material has a normal map
-        if (current_material.normal_map_index > -1)
-        {
-            size_t last_dot = string_list[current_material.normal_map_index].find_last_of('.');
-            new_mtl_file << "bump " << string_list[current_material.normal_map_index].substr(0, last_dot) << ".png\n\n";
-        }
-        else
-        {
-            new_mtl_file << "\n";
-        }
     }
     gltf_data["meshes"].push_back(meshes);
     
-
     gltf_file << setw(4) << gltf_data;
 
     src_file.close();
-    new_mtl_file.close();
-    new_obj_file.close();
     gltf_file.close();
     bin_file.close();
     return texture_list;

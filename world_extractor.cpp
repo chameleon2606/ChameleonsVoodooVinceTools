@@ -72,7 +72,7 @@ void extract_world()
         fld_info fld_h;
         
         fld_file.read(reinterpret_cast<char*>(&header), sizeof(fld_header));
-        string path = "C:\\Users\\leong\\Desktop\\vince stuff\\output\\world\\"+zone.key();
+        string path = "C:\\Users\\leong\\Desktop\\vince stuff\\output\\"+zone.key();
         float buffer_data = 0;
         uint32_t pos = 0;
         uint32_t vert_indices = 0;
