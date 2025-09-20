@@ -18,12 +18,6 @@ using namespace std;
 constexpr uint8_t hot_header_size = 36;
 bool valid_output_dir = false;
 vector<string> texture_list;
-string sub_e;
-string sub_entry;
-int name_iterations;
-bool textures_extracted_check = true;
-bool png_conversion_check = true;
-int is_remastered;
 
 struct hot_header
 {
@@ -103,7 +97,7 @@ void bsp_converter(string &bsp_path)
     bsp_header current_bsp_header;
     
     ifstream bsp_file(bsp_path, ios::binary);
-    ofstream hitbox_file(combined_output_path + sub_entry + "_collision.obj");
+    ofstream hitbox_file(combined_output_path + "_collision.obj");
 
     bsp_file.read(reinterpret_cast<char*>(&current_bsp_header), sizeof(bsp_header));
     // seeks to the section of the vertex data
@@ -139,20 +133,34 @@ void bsp_converter(string &bsp_path)
 }
 
 void glb_compressor(vector<model_info>&models)
-{    
+{
     for (auto& model : models)
     {
         string pathstring = global_output_path;
         pathstring+=model.name;
-        ifstream gltf_file(pathstring+".gltf", ios::binary);
-        ifstream binary_file(pathstring+".bin", ios::binary);
-        ofstream glb_file(pathstring+".glb", ios::binary | ios::trunc);
         
-        vector<char> texture_buffer;
-
+        ifstream gltf_file(pathstring+".gltf", ios::binary);
+        if (!gltf_file.is_open())
+        {
+            cout << "failed to open gltf file " << pathstring << "\n";
+        }
         nlohmann::json gltf_json;
         gltf_json = nlohmann::json::parse(gltf_file);
         gltf_json["buffers"][0].erase("uri");
+        
+        ifstream binary_file(pathstring+".bin", ios::binary);
+        if (!binary_file.is_open())
+        {
+            cout << "failed to open bin file " << pathstring << "\n";
+        }
+        
+        ofstream glb_file(pathstring+".glb", ios::binary | ios::trunc);
+        if (!glb_file.is_open())
+        {
+            cout << "failed to open glb file " << pathstring << "\n";
+        }
+        
+        vector<char> texture_buffer;
         
         for (size_t i = 0; i < model.textures.size(); i++)
         {
@@ -163,35 +171,46 @@ void glb_compressor(vector<model_info>&models)
             ifstream texture_file(texture_path, ios::binary);
             if (!texture_file.is_open())
             {
-                cout << "failed to open " << texture_path << "\n";
-                continue;
+                cout << texture_path << " not present!\n";
             }
-            texture_file.seekg(0, ios::end);
-            long long texture_file_size = texture_file.tellg();
-            
-            vector<char> current_texture_data(texture_file_size);
+            else
+            {
+                texture_file.seekg(0, ios::end);
+                long long texture_file_size = texture_file.tellg();
+                
+                vector<char> current_texture_data(texture_file_size);
+                
+                // save file size, to calculate the offset for the texture buffer
+                binary_file.seekg(0, ios::end);
+                long long binary_file_size = binary_file.tellg();
 
+                // creates buffer view
+                nlohmann::json buffer_view;
+                buffer_view["buffer"] = 0;
+                buffer_view["byteLength"] = texture_file_size;
+                buffer_view["byteOffset"] = binary_file_size+texture_buffer.size();
+                gltf_json["bufferViews"].push_back(buffer_view);
+                
+                texture_file.seekg(0, ios::beg);
+                texture_file.read(current_texture_data.data(),texture_file_size);
+                copy(current_texture_data.begin(), current_texture_data.end(), back_inserter(texture_buffer));
+                
+                texture_file.close();
+            }
             // deletes the uri from the json
             gltf_json["images"][i].erase("uri");
             // creates reference to the new buffer view
             gltf_json["images"][i]["bufferView"] = gltf_json["bufferViews"].size();
+        }
 
-            // save file size, to calculate the offset for the texture buffer
-            binary_file.seekg(0, ios::end);
-            long long binary_file_size = binary_file.tellg();
-
-            // creates buffer view
-            nlohmann::json buffer_view;
-            buffer_view["buffer"] = 0;
-            buffer_view["byteLength"] = texture_file_size;
-            buffer_view["byteOffset"] = binary_file_size+texture_buffer.size();
-            gltf_json["bufferViews"].push_back(buffer_view);
-            
-            texture_file.seekg(0, ios::beg);
-            texture_file.read(current_texture_data.data(),texture_file_size);
-            copy(current_texture_data.begin(), current_texture_data.end(), back_inserter(texture_buffer));
-            
-            texture_file.close();
+        if (pathstring.ends_with("vince_base"))
+        {
+            cout << "vince";
+        }
+        
+        for (auto& primitive : gltf_json["meshes"][0]["primitives"])
+        {
+            primitive.erase("material");
         }
         
         // calculate the size of the entire binary buffer
@@ -206,6 +225,9 @@ void glb_compressor(vector<model_info>&models)
         // calculate the gltf file size and delete the temp file
         tmp_gltf_file.seekp(0, ios::end);
         long long gltf_file_size = tmp_gltf_file.tellp();
+        // creating buffer alignment
+        int8_t json_buffer_alignment = (ceil(gltf_file_size / 4.0f)*4)-gltf_file_size;
+        
         tmp_gltf_file.close();
         remove((pathstring+"_tmp.gltf").c_str());
 
@@ -214,9 +236,12 @@ void glb_compressor(vector<model_info>&models)
         glb_file.write(reinterpret_cast<const char*>(&""), sizeof(char)*12);
         
         // WRITING JSON SECTION
-        glb_file.write(reinterpret_cast<const char*>(&gltf_file_size), sizeof(uint32_t));
+        long long combined_size = gltf_file_size+json_buffer_alignment;
+        glb_file.write(reinterpret_cast<const char*>(&combined_size), sizeof(uint32_t));
         glb_file.write(reinterpret_cast<const char*>(&"JSON"), sizeof(char)*4);
         glb_file << setw(4) << gltf_json;
+        // writes bytes for buffer alignment
+        if (json_buffer_alignment>0)glb_file.write(reinterpret_cast<const char*>(&"   "), json_buffer_alignment);
         gltf_file.close();
         remove((pathstring+".gltf").c_str());
 
@@ -236,9 +261,13 @@ void glb_compressor(vector<model_info>&models)
         
         // writes the bin buffer to the glb file
         bin_data_size = bin_data.size();
-        glb_file.write(reinterpret_cast<const char*>(&bin_data_size), sizeof(uint32_t));
+        int8_t binary_buffer_alignment = (ceil(bin_data_size / 4.0f)*4)-bin_data_size;
+
+        combined_size = binary_buffer_alignment+bin_data_size;
+        glb_file.write(reinterpret_cast<const char*>(&combined_size), sizeof(uint32_t));
         glb_file.write(reinterpret_cast<const char*>(&"BIN"), sizeof(char)*4);
         glb_file.write(bin_data.data(), bin_data_size);
+        glb_file.write(reinterpret_cast<const char*>(&""), binary_buffer_alignment);
 
         // WRITING GLB HEADER
         glb_file.seekp(0, ios::beg);
@@ -265,18 +294,85 @@ void glb_compressor(vector<model_info>&models)
             if (filesystem::exists(pathstring)){remove(pathstring.c_str());}
         }
     }
-    
 }
 
-void extract_hot_file()
+void extract_textures(string filepath, vector<string>*textures)
 {
-    // variables
-    hot_header current_hot_header;
-    ifstream src_file(file_to_extract, ios::binary);
-    if (!src_file.is_open())
+    ifstream textures_file(filepath, ios::binary);
+    if (!textures_file.is_open())
     {
+        cerr << "Could not open file " << filepath.c_str() << "\n";
         return;
     }
+    
+    hot_header current_hot_header;
+    textures_file.seekg(0, ios::beg);
+    textures_file.read(reinterpret_cast<char*>(&current_hot_header), sizeof(hot_header));
+
+    uint32_t last_file_name_offset = 0;
+    for (uint32_t i = 0; i < current_hot_header.file_count; i++)
+    {
+        remastered_file_info current_file_info;
+        textures_file.seekg(hot_header_size+(sizeof(remastered_file_info)*i), ios::beg);
+        textures_file.read(reinterpret_cast<char*>(&current_file_info), sizeof(remastered_file_info));
+
+        textures_file.seekg(current_hot_header.file_name_table_offset + last_file_name_offset, ios::beg);
+        last_file_name_offset = current_file_info.next_name_offset;
+
+        char c;
+        string filename;
+        while (textures_file.read(&c, 1)&& c != '\0')
+        {
+            filename += c;
+        }
+        if (ranges::find(texture_list, filename) != texture_list.end())
+        {
+        }
+        else
+        {
+            continue;
+        }
+        // reading the raw data of the new file but not writing it yet
+        vector<char> data_buffer(current_file_info.uncompressed_size-current_file_info.header_size);
+        textures_file.clear();
+        textures_file.seekg(current_file_info.raw_file_offset);
+        textures_file.read(data_buffer.data(), current_file_info.uncompressed_size-current_file_info.header_size);
+
+        // creating the new file
+        ofstream output_file(combined_output_path+filename, ios::binary, ios::trunc);
+
+        textures_file.clear();
+        textures_file.seekg(current_file_info.header_offset, ios::beg);
+        vector<char> header_buffer(current_file_info.header_size);
+        textures_file.read(header_buffer.data(), current_file_info.header_size);
+        output_file.write(header_buffer.data(), current_file_info.header_size);
+
+        output_file.write(data_buffer.data(), current_file_info.uncompressed_size-current_file_info.header_size);
+
+        output_file.close();
+
+        // converts dds to png file
+        dds_to_png(combined_output_path, filename);
+        remove((combined_output_path+filename).c_str());
+    }
+}
+
+void extract_hot_file(string* filepath)
+{
+    // variables
+    ifstream src_file(*filepath, ios::binary);
+    if (!src_file.is_open())
+    {
+        cerr << "failed to open file." << "\n";
+        return;
+    }
+    
+    size_t last_slash = filepath->find_last_of('\\');
+    string current_filename = filepath->substr(last_slash+1, filepath->size()-last_slash);
+    size_t last_dot = current_filename.find_last_of('.');
+    current_filename = current_filename.substr(0,last_dot);
+    
+    hot_header current_hot_header;
     src_file.clear();
     src_file.seekg(0, ios::beg);
     src_file.read(reinterpret_cast<char*>(&current_hot_header), sizeof(hot_header));
@@ -302,18 +398,7 @@ void extract_hot_file()
         {
             filename += c;
         }
-        size_t last_slash = file_to_extract.find_last_of('\\');
-        if (!texture_list.empty() && file_to_extract.substr(last_slash+1, file_to_extract.length()-last_slash) == "textures.hot")
-        {
-            if (ranges::find(texture_list, filename) != texture_list.end())
-            {
-                name_iterations++;
-            }
-            else
-            {
-                continue;
-            }
-        }
+        string file_to_extract = combined_output_path+filename;
 
         // reading the raw data of the new file but not writing it yet
         vector<char> data_buffer(current_file_info.uncompressed_size-current_file_info.header_size);
@@ -321,8 +406,18 @@ void extract_hot_file()
         src_file.seekg(current_file_info.raw_file_offset);
         src_file.read(data_buffer.data(), current_file_info.uncompressed_size-current_file_info.header_size);
 
+        string output_path;
         // creating the new file
-        ofstream output_file(combined_output_path+filename, ios::binary, ios::trunc);
+        if (filename == "models.hot")
+        {
+            last_slash = filepath->find_last_of('\\');
+            output_path = filepath->substr(0, last_slash+1) + filename;
+        }
+        else
+        {
+            output_path = combined_output_path+filename;
+        }
+        ofstream output_file(output_path, ios::binary, ios::trunc);
         
         if (current_hot_header.headers_offset != current_hot_header.data_offset)    // file has a header
         {
@@ -351,36 +446,24 @@ void extract_hot_file()
             // writing uncompressed data
             output_file.write(uncompressed_data.data(), current_file_info.uncompressed_size);
             output_file.close();
-            file_to_extract = combined_output_path+filename;
-            extract_hot_file();
+            
+            if (filename == "models.hot")
+            {
+                last_slash = filepath->find_last_of('\\');
+                file_to_extract = filepath->substr(0, last_slash+1) + filename;
+            }
+            extract_hot_file(&file_to_extract);
             
             // remove .hot file after extraction
-            if (delete_extracted_file) remove((combined_output_path+filename).c_str());
-        }
-        // checks if the .gator files should convert into .obj files directly
-        if (filename.ends_with(".gator"))
-        {
-            output_file.close();
-            vector<string> tmp_list = extract_model(combined_output_path+filename);
-            texture_list.insert(texture_list.begin(), tmp_list.begin(), tmp_list.end());
-            
-            size_t last_dot = filename.find_last_of('.');
-            models[i].name = filename.substr(0, last_dot);
-            models[i].textures = tmp_list;
-            
-            // delete the .gator after we have extracted it
-            if (delete_extracted_file) remove((combined_output_path+filename).c_str());
+            if (delete_extracted_file) remove((file_to_extract).c_str());
         }
 
         if (filename.ends_with(".dds"))
         {
             output_file.close();
-
-            if (png_conversion_check)
-            {
-                dds_to_png(combined_output_path, filename);
-                remove((combined_output_path+filename).c_str());
-            }
+            
+            dds_to_png(combined_output_path, filename);
+            remove((combined_output_path+filename).c_str());
         }
         if (filename.ends_with(".bsp") && convert_level_bsp)
         {
@@ -388,38 +471,51 @@ void extract_hot_file()
             output_file.close();
             bsp_converter(bsp_path);
         }
-        if (output_file.is_open())
+        if (current_filename == "models")
         {
+            // extract model and fetch all of its texture names
             output_file.close();
-        }
-    }
-    if (!texture_list.empty() && textures_extracted_check)
-    {
-        size_t last_slash = sub_e.find_last_of('\\');
-        if (sub_e.substr(0, last_slash).ends_with("common"))
-        {
-            return;
-        }
-        textures_extracted_check = false;
-        // erase duplicate texture names
-        sort(texture_list.begin(), texture_list.end());
-        auto last = unique(texture_list.begin(), texture_list.end());
-        texture_list.erase(last, texture_list.end());
-
-        // converts all texture names to lowercase for proper comparison
-        ranges::for_each(texture_list, [](string& texture_name)
-        {
-            ranges::transform(texture_name, texture_name.begin(), [](char c)
+            vector<string> tmp_texture_list = extract_model(file_to_extract);
+            texture_list.insert(texture_list.begin(), tmp_texture_list.begin(), tmp_texture_list.end());
+            
+            last_dot = filename.find_last_of('.');
+            models[i].name = filename.substr(0, last_dot);
+            models[i].textures = tmp_texture_list;
+            
+            // delete the .gator after we have extracted it
+            if (delete_extracted_file) remove(file_to_extract.c_str());
+            /*
+            last_slash = filepath->find_last_of('\\');
+            if (filepath->substr(0, last_slash).ends_with("common"))
             {
-                return tolower(c);
+                return;
+            }
+            */
+            // erase duplicate texture names
+            sort(texture_list.begin(), texture_list.end());
+            auto last = unique(texture_list.begin(), texture_list.end());
+            texture_list.erase(last, texture_list.end());
+
+            // converts all texture names to lowercase for proper comparison
+            ranges::for_each(texture_list, [](string& texture_name)
+            {
+                ranges::transform(texture_name, texture_name.begin(), [](char c)
+                {
+                    return tolower(c);
+                });
             });
-        });
-        
-        // extract all textures from the model
-        file_to_extract = sub_e;
-        extract_hot_file();
-        if (model_compression)glb_compressor(models);
+
+            if (i == current_hot_header.file_count-1)
+            {
+                // extract all textures from the model
+                last_slash = filepath->find_last_of('\\');
+                string textures_path = filepath->substr(0, last_slash+1) + "textures.hot";
+                extract_textures(textures_path,&texture_list);
+                glb_compressor(models);
+            }
+        }
     }
+    
 }
 
 static void display_file_tree(const string& path)
@@ -441,17 +537,11 @@ static void display_file_tree(const string& path)
                             {
                                 if (ImGui::Selectable(hot_files.path().filename().string().c_str()))
                                 {
-                                    texture_list.clear();
-                                    textures_extracted_check = true;
+                                    string file_to_extract = hot_files.path().string();
+                                    extract_hot_file(&file_to_extract);
                                     
-                                    file_to_extract = hot_files.path().string();
-                                    size_t last_slash = file_to_extract.find_last_of('\\');
-                                    sub_e = file_to_extract.substr(0, last_slash);
-                                    sub_e += "\\textures.hot";
-                                    sub_entry = subentry.path().filename().string();
-                                    
-                                    thread taskThread(extract_hot_file);
-                                    taskThread.join();
+                                    //thread taskThread(extract_hot_file());
+                                    //taskThread.join();
                                 }
                             }
                         }
@@ -469,11 +559,7 @@ void hot_extractor_loop()
 {
     if (ImGui::TreeNodeEx("Options"))
     {
-        ImGui::Checkbox("convert .dds files to .png", &png_conversion_check);
-        ImGui::Checkbox("Use alternative UV maps", &use_uv2);
-        ImGui::SetItemTooltip("If textures don't appear correctly on the 3D model, try checking this box");
         ImGui::Checkbox("delete extracted and converted files", &delete_extracted_file);
-        ImGui::Checkbox("Convert row-major bind matrix to column-major", &matrix_convert);
         ImGui::SetItemTooltip("DirectX uses row-major matrices, OpenGL (blender) uses col-major");
         ImGui::Checkbox("Pack models and textures into .glb files", &model_compression);
         ImGui::SetItemTooltip("May take longer to extract");

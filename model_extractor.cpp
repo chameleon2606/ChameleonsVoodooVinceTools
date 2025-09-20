@@ -15,12 +15,10 @@ using namespace std;
 
 string path = filesystem::current_path().string()+"\\models\\";
 
-bool valid_output_path;
 char gator_files_folder[128] = "C:\\Users\\leong\\Desktop\\vince stuff\\output";
 bool valid_folders;
 static constexpr uint32_t vert_header_size = 48;
 static float uv_scale = 6.0f;
-string error_message;
 constexpr uint16_t bone_info_size = 288;
 const vector<float>default_matrix = {1.0,0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,1.0};
 struct gator_header
@@ -30,7 +28,7 @@ struct gator_header
     int16_t thing5, thing6;
     uint16_t thing7, thing8, table_4_entries, string_count;
     uint32_t start_of_verts, start_of_tris, tstrip_table, materials_offset, hitbox_data_offset, bones_table, bone_joints_offset, string_offsets, string_lookup_table;
-    float thing10, thing11, thing12, thing13, thing14, thing15, thing16, thing17, thing18, thing19, thing20;
+    float min_x, min_y, min_z, max_x, max_y, max_z, thing16, thing17, thing18, thing19, thing20;
 };
 struct vert_info
 {
@@ -272,9 +270,7 @@ vector<string> extract_model(string current_filepath)
     vector<char>joints_buffer;
     vector<char>weights_buffer;
     vector<uint16_t>index_reference;
-
-    float max_x = 0, min_x = 0, max_y = 0, min_y = 0, max_z = 0, min_z = 0;
-
+    
     vector<uint8_t>joints;
     vector<uint8_t>weights;
     vector<float>vertex_positions;
@@ -322,37 +318,14 @@ vector<string> extract_model(string current_filepath)
         norms.push_back({current_verts.x_norm,current_verts.y_norm,current_verts.z_norm});
         
         // puts UVs into a list
-        if (use_uv2)
-        {
-            // multiplies the UVs times 6, so they appear correctly
-            current_verts.x_uv2 *= uv_scale;
-            current_verts.y_uv2 *= uv_scale;
-            uvs.push_back({current_verts.x_uv2, (current_verts.y_uv2 * -1) + 1});   // flipps the UV upside down
+        current_verts.x_uv1 *= uv_scale;
+        current_verts.y_uv1 *= uv_scale;
+        uvs.push_back({current_verts.x_uv1, (current_verts.y_uv1 * -1) + 1});
 
-            src_file.seekg(current_gator_header.start_of_verts +(sizeof(vert_info)*i) + 56, ios::beg);
-            vector<char>tmp_uv_buffer(2*sizeof(float));
-            src_file.read(tmp_uv_buffer.data(), tmp_uv_buffer.size());
-            copy(tmp_uv_buffer.begin(), tmp_uv_buffer.end(), back_inserter(uv_buffer));
-        }
-        else
-        {
-            current_verts.x_uv1 *= uv_scale;
-            current_verts.y_uv1 *= uv_scale;
-            uvs.push_back({current_verts.x_uv1, (current_verts.y_uv1 * -1) + 1});
-
-            src_file.seekg(current_gator_header.start_of_verts +(sizeof(vert_info)*i) + 48, ios::beg);
-            vector<char>tmp_uv_buffer(2*sizeof(float));
-            src_file.read(tmp_uv_buffer.data(), tmp_uv_buffer.size());
-            copy(tmp_uv_buffer.begin(), tmp_uv_buffer.end(), back_inserter(uv_buffer));
-        }
-
-        // the gltf file wants min and max position values
-        if (current_verts.x_pos > max_x)max_x = current_verts.x_pos;
-        else if (current_verts.x_pos < min_x)min_x = current_verts.x_pos;
-        if (current_verts.y_pos > max_y)max_y = current_verts.y_pos;
-        else if (current_verts.y_pos < min_y)min_y = current_verts.y_pos;
-        if (current_verts.z_pos > max_z)max_z = current_verts.z_pos;
-        else if (current_verts.z_pos < min_z)min_z = current_verts.z_pos;
+        src_file.seekg(current_gator_header.start_of_verts +(sizeof(vert_info)*i) + 48, ios::beg);
+        vector<char>tmp_uv_buffer(2*sizeof(float));
+        src_file.read(tmp_uv_buffer.data(), tmp_uv_buffer.size());
+        copy(tmp_uv_buffer.begin(), tmp_uv_buffer.end(), back_inserter(uv_buffer));
     }
 
     if (current_gator_header.bone_count > 1)
@@ -407,8 +380,8 @@ vector<string> extract_model(string current_filepath)
     vertex_pos_accessor["bufferView"] = buffer_view_count;
     vertex_pos_accessor["componentType"] = 5126;
     vertex_pos_accessor["count"] = current_gator_header.vert_count;
-    vertex_pos_accessor["max"] = {max_x,max_y,max_z};
-    vertex_pos_accessor["min"] = {min_x,min_y,min_z};
+    vertex_pos_accessor["max"] = {current_gator_header.max_x,current_gator_header.max_y,current_gator_header.max_z};
+    vertex_pos_accessor["min"] = {current_gator_header.min_x,current_gator_header.min_y,current_gator_header.min_z};
     vertex_pos_accessor["type"] = "VEC3";
     gltf_data["accessors"].push_back(vertex_pos_accessor);
     vertex_position_index = accessor_count;
@@ -671,14 +644,6 @@ void m_extractor_loop()
         valid_folders = folder_validation(gator_files_folder) && folder_validation(global_output_path);
         combined_output_path = global_output_path;
         if (!combined_output_path.ends_with("\\"))combined_output_path+="\\";
-    }
-    if (ImGui::TreeNodeEx("Options"))
-    {
-        ImGui::SetItemTooltip("If the UV doesn't appear correctly, try checking this box");
-        ImGui::Checkbox("Use alternative UV", &use_uv2);
-        ImGui::Checkbox("Convert row-major bind matrix to column-major", &matrix_convert);
-        ImGui::SetItemTooltip("DirectX uses row-major matrices, OpenGL (blender) uses col-major");
-        ImGui::TreePop();
     }
 
     if (valid_folders)
