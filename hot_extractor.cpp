@@ -169,9 +169,24 @@ void glb_compressor(vector<model_info>&models)
             string texture_path = global_output_path;
             texture_path+=model.textures[i].substr(0, last_dot)+".png";
             ifstream texture_file(texture_path, ios::binary);
+            
+            // deletes the uri from the json
+            gltf_json["images"][i].erase("uri");
+            // creates reference to the new buffer view
+            gltf_json["images"][i]["bufferView"] = gltf_json["bufferViews"].size();
+            
             if (!texture_file.is_open())
             {
                 cout << texture_path << " not present!\n";
+                
+                for (auto& primitive : gltf_json["meshes"][0]["primitives"])
+                {
+                    if (primitive.contains("material") && primitive["material"] == i)
+                    {
+                        primitive.erase("material");
+                    }
+                }
+                
             }
             else
             {
@@ -197,20 +212,6 @@ void glb_compressor(vector<model_info>&models)
                 
                 texture_file.close();
             }
-            // deletes the uri from the json
-            gltf_json["images"][i].erase("uri");
-            // creates reference to the new buffer view
-            gltf_json["images"][i]["bufferView"] = gltf_json["bufferViews"].size();
-        }
-
-        if (pathstring.ends_with("vince_base"))
-        {
-            cout << "vince";
-        }
-        
-        for (auto& primitive : gltf_json["meshes"][0]["primitives"])
-        {
-            primitive.erase("material");
         }
         
         // calculate the size of the entire binary buffer
@@ -291,7 +292,7 @@ void glb_compressor(vector<model_info>&models)
             string pathstring = global_output_path;
             pathstring+= texture.substr(0, last_dot)+".png";
             
-            if (filesystem::exists(pathstring)){remove(pathstring.c_str());}
+            if (filesystem::exists(pathstring)&&delete_extracted_file){remove(pathstring.c_str());}
         }
     }
 }
@@ -484,13 +485,7 @@ void extract_hot_file(string* filepath)
             
             // delete the .gator after we have extracted it
             if (delete_extracted_file) remove(file_to_extract.c_str());
-            /*
-            last_slash = filepath->find_last_of('\\');
-            if (filepath->substr(0, last_slash).ends_with("common"))
-            {
-                return;
-            }
-            */
+            
             // erase duplicate texture names
             sort(texture_list.begin(), texture_list.end());
             auto last = unique(texture_list.begin(), texture_list.end());
@@ -507,10 +502,13 @@ void extract_hot_file(string* filepath)
 
             if (i == current_hot_header.file_count-1)
             {
-                // extract all textures from the model
                 last_slash = filepath->find_last_of('\\');
-                string textures_path = filepath->substr(0, last_slash+1) + "textures.hot";
-                extract_textures(textures_path,&texture_list);
+                if (!filepath->substr(0, last_slash).ends_with("common"))
+                {
+                    // extract all textures from the model
+                    string textures_path = filepath->substr(0, last_slash+1) + "textures.hot";
+                    extract_textures(textures_path,&texture_list);
+                }
                 glb_compressor(models);
             }
         }
