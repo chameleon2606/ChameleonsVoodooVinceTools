@@ -257,6 +257,7 @@
     <ClInclude Include="model_extractor.h" />
     <ClInclude Include="openGL.h" />
     <ClInclude Include="repacking.h" />
+    <ClInclude Include="tdf_json_parser.h" />
     <ClInclude Include="world_extractor.h" />
   </ItemGroup>
   <ItemGroup>

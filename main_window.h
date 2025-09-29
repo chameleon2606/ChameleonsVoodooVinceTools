@@ -10,5 +10,6 @@ inline bool dds_convert = true;
 inline bool delete_extracted_file = true;
 inline bool convert_level_bsp = true;
 inline bool model_compression = true;
+inline bool convert_world = true;
 void init_main();
 void main_loop();

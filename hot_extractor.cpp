@@ -8,6 +8,8 @@
 #include "model_extractor.h"
 #include "FreeImage.h"
 #include "include/json.hpp"
+#include "tdf_json_parser.h"
+#include "world_extractor.h"
 
 extern "C"{
 #include <zlib.h>
@@ -97,7 +99,7 @@ void bsp_converter(string &bsp_path)
     bsp_header current_bsp_header;
     
     ifstream bsp_file(bsp_path, ios::binary);
-    ofstream hitbox_file(combined_output_path + "_collision.obj");
+    ofstream hitbox_file(combined_output_path + "collision.obj");
 
     bsp_file.read(reinterpret_cast<char*>(&current_bsp_header), sizeof(bsp_header));
     // seeks to the section of the vertex data
@@ -509,11 +511,24 @@ void extract_hot_file(string* filepath)
                     string textures_path = filepath->substr(0, last_slash+1) + "textures.hot";
                     extract_textures(textures_path,&texture_list);
                 }
-                glb_compressor(models);
+                if (model_compression){glb_compressor(models);}
             }
         }
+        
+        if (filename == "index.tdf")
+        {
+            output_file.close();
+            ofstream json_file(combined_output_path+"index.json");
+            json_file << parse_tdf(output_path);
+            json_file.close();
+            //parse_tdf(output_path);
+        }
+        if (output_file.is_open()){output_file.close();}
     }
-    
+    if (current_filename == "world" && convert_world)
+    {
+        extract_world();
+    }
 }
 
 static void display_file_tree(const string& path)
@@ -566,6 +581,7 @@ void hot_extractor_loop()
         ImGui::RadioButton("Original", &is_remastered, 1);
         */
         ImGui::Checkbox("extract level colliders", &convert_level_bsp);
+        ImGui::Checkbox("convert world data to 3D model", &convert_world);
         ImGui::TreePop();
     }
     if (ImGui::InputText("Output path", global_output_path, IM_ARRAYSIZE(global_output_path)))

@@ -10,9 +10,7 @@
 #include "GLFW/glfw3.h"
 
 using namespace std;
-// x=-x y=-z z=y
 char vertices_path[128] = "C:\\Users\\leong\\Desktop\\vince stuff\\output\\vertices.raw";
-//char fld_path[128] = "C:\\Users\\leong\\Desktop\\vince stuff\\output\\zone000";
 char index_path[128] = "C:\\Users\\leong\\Desktop\\vince stuff\\output\\index.json";
 size_t remember_position = 0;
 
@@ -34,7 +32,9 @@ void extract_world()
         char id[4];
         int version;
         uint32_t last_header;
-        int values[3];
+        int16_t values[2];
+        int16_t first_section;
+        int16_t values2[3];
         uint32_t some_offset1;
         uint32_t some_offset2;
     };
@@ -92,7 +92,7 @@ void extract_world()
                 size_t last_dot = to_string(jsonData["Materials"][to_string(fld_h.texture_index)]["base"]).find_last_of('.');
                 string mtl = to_string(jsonData["Materials"][to_string(fld_h.texture_index)]["base"]).substr(1,last_dot-1);
                 
-                remember_position = fld_file.tellg();
+                size_t remember_position = fld_file.tellg();
                     
                fld_file.seekg(header.some_offset2 + fld_h.some_offset, ios::beg);
                uint32_t offset;
