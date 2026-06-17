@@ -5,8 +5,8 @@
 #include <string>
 #include <filesystem>
 #include <typeinfo>
+#include <unordered_map>
 #include "model_extractor.h"
-#include <thread>
 #include "GLFW/glfw3.h"
 #include "main_window.h"
 #include "include/json.hpp"
@@ -15,9 +15,8 @@ using namespace std;
 
 string path = filesystem::current_path().string()+"\\models\\";
 
-char gator_files_folder[128] = "C:\\Users\\leong\\Desktop\\vince stuff\\output";
 bool valid_folders;
-static constexpr uint32_t vert_header_size = 48;
+static constexpr uint32_t face_table_section_size = 48;
 static float uv_scale = 6.0f;
 constexpr uint16_t bone_info_size = 288;
 const vector<float>default_matrix = {1.0,0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,1.0};
@@ -26,7 +25,7 @@ struct gator_header
     char magic[4];
     uint32_t version, thing, thing2, vert_count, tri_count, tstrip_count, material_count, bone_count;
     int16_t thing5, thing6;
-    uint16_t thing7, thing8, table_4_entries, string_count;
+    uint16_t thing7, thing8, bone_joints_count, string_count;
     uint32_t start_of_verts, start_of_tris, tstrip_table, materials_offset, hitbox_data_offset, bones_table, bone_joints_offset, string_offsets, string_lookup_table;
     float min_x, min_y, min_z, max_x, max_y, max_z, thing16, thing17, thing18, thing19, thing20;
 };
@@ -45,7 +44,10 @@ struct tstrip_info
     uint16_t u_value0[7];
     float u_value1;
     uint16_t material_index;
-    uint16_t u_value2[13];
+    uint16_t joint_table_index;
+    uint16_t u_value2[2];
+    uint16_t texture_name_2;
+    uint16_t u_value3[9];
 };
 struct material_info
 {
@@ -61,10 +63,14 @@ struct bones_data
     uint32_t padding;
     float value_x, value_y, value_z;
     float rot_x, rot_y, rot_z;
-    float rest_pose_matrix[4][4];
-    float bind_pose_matrix[4][4];
+    float bind_matrix[4][4];
+    float inverse_bind_matrix[4][4];
     float matrix_3[4][4];
     float matrix_4[4][4];
+};
+struct bone_joint_info
+{
+    uint32_t size, offset;
 };
 
 bool folder_validation(char folder[])
@@ -78,6 +84,45 @@ bool folder_validation(char folder[])
         return false;
     }
 }
+
+//converts 4x4 float to array
+array<array<float,4>,4> to_array(float m[4][4])
+{
+    array<array<float,4>,4> result{};
+    for (int row = 0; row < 4; row++)
+        for (int col = 0; col < 4; col++)
+            result[row][col] = m[row][col];
+    return result;
+}
+
+//mirrors 4x4 matrix for flipping the model
+array<array<float,4>,4> mirror_x(const array<array<float,4>,4>& m)
+{
+    array<array<float,4>,4> result{};
+    for (int row = 0; row < 4; row++)
+        for (int col = 0; col < 4; col++)
+        {
+            float sign = ((row == 0) != (col == 0)) ? -1.0f : 1.0f;
+            result[row][col] = m[row][col] * sign;
+        }
+    return result;
+}
+
+//multiplies 2 the current bind matrix with it's parent inverse bind matrix
+array<array<float,4>,4> mat4_multiply(const array<array<float,4>,4>& a, const array<array<float,4>,4>& b)
+{
+    array<array<float,4>,4> result{};
+    for (int row = 0; row < 4; row++)
+        for (int col = 0; col < 4; col++)
+        {
+            float sum = 0.0f;
+            for (int k = 0; k < 4; k++)
+                sum += a[row][k] * b[k][col];
+            result[row][col] = sum;
+        }
+    return result;
+}
+
 
 void init_model_extractor()
 {
@@ -96,14 +141,13 @@ vector<string> extract_model(string current_filepath)
     uint16_t weights_index = 0;
     uint16_t bone_indices_index = 0;
     
-    string gator_string = gator_files_folder;
     size_t last_slash = current_filepath.find_last_of('\\');
     string current_filename = current_filepath.substr(last_slash+1, current_filepath.size()-last_slash);
     size_t last_dot = current_filename.find_last_of('.');
     current_filename = current_filename.substr(0,last_dot);
 
-    // creates a new .obj file with the name of the gator file
-    ifstream src_file(current_filepath, ios::binary);                                                      // input .gator file
+    // creates a new .gltf & .bin file with the name of the gator file
+    ifstream src_file(current_filepath, ios::binary); // input .gator file
     ofstream gltf_file(combined_output_path+"\\"+current_filename + ".gltf", ios::trunc);
     ofstream bin_file(combined_output_path+"\\"+current_filename + ".bin", ios::binary | ios::trunc);
 
@@ -151,9 +195,16 @@ vector<string> extract_model(string current_filepath)
     gltf_data["scene"] = 0;
     nlohmann::json scene;
     scene["name"] = "Scene";
-    if (current_gator_header.bone_count > 1)
+    if (include_bones)
     {
-        scene["nodes"] = {0,1};
+        if (current_gator_header.bone_count > 1)
+        {
+            scene["nodes"] = {0,1};
+        }
+        else
+        {
+            scene["nodes"] = {0};
+        }
     }
     else
     {
@@ -162,70 +213,103 @@ vector<string> extract_model(string current_filepath)
     gltf_data["scenes"].push_back(scene);
 
     uint32_t current_bin_size = 0;
-
-    // collects bone data
     
-    // loops through bones to collect all parents data
-    vector<bones_data> bones;
-    vector<int16_t> bone_parent_list;
-    for (uint32_t i = 0; i < current_gator_header.bone_count; i++)
+    // collects bone data
+    if (include_bones)
     {
-        bones_data current_bone;
-        src_file.clear();
-        src_file.seekg(current_gator_header.bones_table + (bone_info_size * i), ios::beg);
-        src_file.read(reinterpret_cast<char*>(&current_bone), sizeof(bones_data));
+        // loops through bones to collect all parents data
+        vector<bones_data> bones;
+        vector<int16_t> bone_parent_list;
         
-        bones.push_back(current_bone);
-        bone_parent_list.push_back(current_bone.parent_index);
-    }
+        for (uint32_t i = 0; i < current_gator_header.bone_count; i++)
+        {
+            bones_data current_bone;
+            src_file.clear();
+            src_file.seekg(current_gator_header.bones_table + (bone_info_size * i), ios::beg);
+            src_file.read(reinterpret_cast<char*>(&current_bone), sizeof(bones_data));
+        
+            bones.push_back(current_bone);
+            bone_parent_list.push_back(current_bone.parent_index);
+        }
+        
+        
+        
+        // build the index lookup
+        unordered_map<uint16_t, size_t> bone_index_to_pos;
+        for (size_t k = 0; k < bones.size(); k++)
+        {
+            bone_index_to_pos[bones[k].index] = k;
+        }
+        
+        
+        // mirror every bone's bind/inverse-bind matrices to match the flipped mesh
+        vector<array<array<float,4>,4>> mirrored_bind(bones.size());
+        vector<array<array<float,4>,4>> mirrored_inv_bind(bones.size());
+        for (size_t k = 0; k < bones.size(); k++)
+        {
+            mirrored_bind[k]     = mirror_x(to_array(bones[k].bind_matrix));
+            mirrored_inv_bind[k] = mirror_x(to_array(bones[k].inverse_bind_matrix));
+        }
 
-    // loops though bones again to collect all bone data
-    vector<float>bind_matrix_list;
-    for (uint32_t i = 0; i < bones.size(); i++)
-    {
-        vector<float>pose_positions;
         
-        for (int row = 0; row < 4; ++row) {
-            for (int col = 0; col < 4; ++col) {
-                
-                // matrix list for binary data
-                bind_matrix_list.push_back(bones[i].bind_pose_matrix[row][col]);
-                // matrix list for gltf file
-                pose_positions.push_back(bones[i].rest_pose_matrix[row][col]);
-            }
-        }
-        
-        nlohmann::json bone;
-        bone["name"] = string_list[bones[i].index];
-        if (pose_positions != default_matrix)
+        // loops though bones again to collect all bone data
+        vector<float>inverse_bind_matrix_list;
+        for (uint32_t i = 0; i < bones.size(); i++)
         {
-            bone["matrix"] = pose_positions;
-        }
-        vector<int16_t> bone_children_list;
-        if (i == 0)
-        {
-            bone["mesh"] = 0;
-            if (current_gator_header.bone_count > 1)
-            {
-                bone["skin"] = 0;
-            }
-        }
-        for (uint32_t k = 0; k < bone_parent_list.size(); k++)
-        {
-            if (bone_parent_list[k] == bones[i].index)
-            {
-                bone_children_list.push_back(k);
-            }
-        }
-        if (!bone_children_list.empty())
-        {
-            bone["children"] = bone_children_list;
-        }
-        gltf_data["nodes"].push_back(bone);
-    }
+            vector<float>pose_positions;
+            array<array<float,4>,4> local_matrix;
 
-    if (!texture_list.empty())
-    {
+            // collects inverse bind matrix data for the .bin file
+            for (int row = 0; row < 4; ++row)
+                for (int col = 0; col < 4; ++col)
+                    inverse_bind_matrix_list.push_back(mirrored_inv_bind[i][row][col]);
+
+            // rest pose (relative to parent)
+            if (bones[i].parent_index == -1)
+            {
+                local_matrix = mirrored_bind[i];
+            }
+            else
+            {
+                size_t parent_pos = bone_index_to_pos.at(static_cast<uint16_t>(bones[i].parent_index));
+                local_matrix = mat4_multiply(mirrored_bind[i], mirrored_inv_bind[parent_pos]);
+            }
+
+            for (int row = 0; row < 4; ++row)
+                for (int col = 0; col < 4; ++col)
+                    pose_positions.push_back(local_matrix[row][col]);
+            
+        
+            nlohmann::json bone;
+            bone["name"] = string_list[bones[i].index];
+            if (pose_positions != default_matrix)
+            {
+                bone["matrix"] = pose_positions;
+            }
+            vector<int16_t> bone_children_list;
+            if (i == 0)
+            {
+                bone["mesh"] = 0;
+                if (current_gator_header.bone_count > 1)
+                {
+                    bone["skin"] = 0;
+                }
+            }
+            for (uint32_t k = 0; k < bone_parent_list.size(); k++)
+            {
+                if (bone_parent_list[k] == bones[i].index)
+                {
+                    bone_children_list.push_back(k);
+                }
+            }
+            if (!bone_children_list.empty())
+            {
+                bone["children"] = bone_children_list;
+            }
+            gltf_data["nodes"].push_back(bone);
+        }
+
+    
         nlohmann::json rig_accessor;
         rig_accessor["bufferView"] = buffer_view_count;
         rig_accessor["componentType"] = 5126;
@@ -233,30 +317,39 @@ vector<string> extract_model(string current_filepath)
         rig_accessor["type"] = "MAT4";
         gltf_data["accessors"].push_back(rig_accessor);
         accessor_count++;
-
+    
         current_bin_size = bin_file.tellp();
-        bin_file.write(reinterpret_cast<const char*>(bind_matrix_list.data()),bind_matrix_list.size() * sizeof(float));
-        
+        bin_file.write(reinterpret_cast<const char*>(inverse_bind_matrix_list.data()),inverse_bind_matrix_list.size() * sizeof(float));
+    
         nlohmann::json rig_buffer_views;
         rig_buffer_views["byteLength"] = bones.size()*16*sizeof(float);
         rig_buffer_views["buffer"] = 0;
         rig_buffer_views["byteOffset"] = current_bin_size;
         gltf_data["bufferViews"].push_back(rig_buffer_views);
         buffer_view_count++;
-    }
+    
         
-    vector<int16_t> bone_joints_list;
-    for (uint32_t i = 0; i < bones.size(); i++)
-    {
-        bone_joints_list.push_back(i);
-    }
+        vector<int16_t> bone_joints_list;
+        for (uint32_t i = 0; i < bones.size(); i++)
+        {
+            bone_joints_list.push_back(i);
+        }
 
-    if (current_gator_header.bone_count > 1)
+        if (current_gator_header.bone_count > 1)
+        {
+            nlohmann::json skin;
+            skin["inverseBindMatrices"] = 0;
+            skin["joints"] = bone_joints_list;
+            skin["name"] = current_filename;
+            gltf_data["skins"].push_back(skin);
+        }
+    }
+    else
     {
-        nlohmann::json skin;
-        skin["inverseBindMatrices"] = 0;
-        skin["joints"] = bone_joints_list;
-        gltf_data["skins"].push_back(skin);
+        nlohmann::json node;
+        node["mesh"] = 0;
+        node["name"] = current_filename;
+        gltf_data["nodes"].push_back(node);
     }
     
     
@@ -267,15 +360,81 @@ vector<string> extract_model(string current_filepath)
     vector<char>vertex_pos_buffer;
     vector<char>norms_buffer;
     vector<char>uv_buffer;
+    
     vector<char>joints_buffer;
     vector<char>weights_buffer;
     vector<uint16_t>index_reference;
     
     vector<uint8_t>joints;
     vector<uint8_t>weights;
+    
     vector<float>vertex_positions;
     vector<float>normals;
     vector<float>texcoords;
+    
+    
+    unordered_map<uint16_t, uint16_t> joints_map;
+    vector<vector<char>> joint_lists;
+    unordered_map<uint16_t, uint8_t> joints_index_map;
+    
+    if (current_gator_header.bone_joints_offset)
+    {
+        vector<uint32_t>verts_in_face_list;
+        
+        for (uint32_t j = 0; j < current_gator_header.tstrip_count; j++)
+        {
+            //get table struct and find verts in face count
+            src_file.clear();
+            src_file.seekg(current_gator_header.tstrip_table + (face_table_section_size * j), ios::beg);
+            tstrip_info current_tstrip;
+            src_file.read(reinterpret_cast<char*>(&current_tstrip), sizeof(tstrip_info));
+                        
+            verts_in_face_list.push_back(current_tstrip.verts_in_strip);
+            joints_index_map[j] = current_tstrip.joint_table_index;
+        }
+        
+        //seek to beginning of faces
+        //read all tris
+        src_file.clear();
+        vector<uint16_t> all_faces(current_gator_header.tri_count);
+        src_file.seekg(current_gator_header.start_of_tris, ios::beg);
+        src_file.read(reinterpret_cast<char*>(all_faces.data()), current_gator_header.tri_count*sizeof(uint16_t));
+        
+        uint16_t tick = 0;
+        uint32_t vert_sum = verts_in_face_list[0];
+        uint32_t last_vert = 0;
+        
+        //writes map of what vertex groups belong to what joint indices
+        for (uint32_t j = 0; j < current_gator_header.tri_count; j++)
+        {
+            if (j >= vert_sum)
+            {
+                tick++;
+                vert_sum += verts_in_face_list[tick];
+            }
+            if (all_faces[j] > last_vert)
+            {
+                joints_map[all_faces[j]] = joints_index_map[tick];
+                last_vert = all_faces[j];
+            }
+        }
+        
+        //gets list of bone joints
+        for (size_t j = 0; j < current_gator_header.bone_joints_count; j++)
+        {
+            src_file.clear();
+            src_file.seekg(current_gator_header.bone_joints_offset + (j * sizeof(bone_joint_info)), ios::beg);
+            bone_joint_info current_bone_info;
+            src_file.read(reinterpret_cast<char*>(&current_bone_info), sizeof(current_bone_info));
+            
+            vector<char> bone_order(current_bone_info.size);
+            src_file.clear();
+            src_file.seekg(current_bone_info.offset, ios::beg);
+            src_file.read(bone_order.data(), bone_order.size());
+            
+            joint_lists.push_back(bone_order);
+        }
+    }
 
     // loop through each vertex data section
     for (uint32_t i=0; i < current_gator_header.vert_count; i++)
@@ -287,24 +446,61 @@ vector<string> extract_model(string current_filepath)
         // grabs all data for that vertex
         src_file.read(reinterpret_cast<char*>(&current_verts), sizeof(vert_info));
 
-        joints.push_back(current_verts.bone1_index);
-        joints.push_back(current_verts.bone2_index);
-        joints.push_back(current_verts.bone3_index);
-        joints.push_back(current_verts.bone4_index);
+        if (include_bones)
+        {
+            if (current_gator_header.bone_joints_offset)
+            {
+                //writes bone indices
+                joints.push_back(joint_lists[joints_map[i]][current_verts.bone1_index]);
+                if (current_verts.bone2_index > 0)
+                {
+                    joints.push_back(joint_lists[joints_map[i]][current_verts.bone2_index]);
+                }
+                else
+                {
+                    joints.push_back(0);
+                }
+                if (current_verts.bone3_index > 0)
+                {
+                    joints.push_back(joint_lists[joints_map[i]][current_verts.bone3_index]);
+                }
+                else
+                {
+                    joints.push_back(0);
+                }
+                if (current_verts.bone4_index > 0)
+                {
+                    joints.push_back(joint_lists[joints_map[i]][current_verts.bone4_index]);
+                }
+                else
+                {
+                    joints.push_back(0);
+                }
+            }
+            else
+            {
+                joints.push_back(current_verts.bone1_index);
+                joints.push_back(current_verts.bone2_index);
+                joints.push_back(current_verts.bone3_index);
+                joints.push_back(current_verts.bone4_index);
+            }
 
-        weights.push_back(current_verts.bone1_weight);
-        weights.push_back(current_verts.bone2_weight);
-        weights.push_back(current_verts.bone3_weight);
-        weights.push_back(current_verts.bone4_weight);
+            weights.push_back(current_verts.bone1_weight);
+            weights.push_back(current_verts.bone2_weight);
+            weights.push_back(current_verts.bone3_weight);
+            weights.push_back(current_verts.bone4_weight);
+        }
 
-        vertex_positions.push_back(current_verts.x_pos);
+        
+        vertex_positions.push_back(-current_verts.x_pos);
         vertex_positions.push_back(current_verts.y_pos);
         vertex_positions.push_back(current_verts.z_pos);
 
-        normals.push_back(current_verts.x_norm);
+        normals.push_back(-current_verts.x_norm);
         normals.push_back(current_verts.y_norm);
         normals.push_back(current_verts.z_norm);
-
+        
+        
         texcoords.push_back(current_verts.x_uv1*6);
         texcoords.push_back(current_verts.y_uv1*6);
 
@@ -328,50 +524,54 @@ vector<string> extract_model(string current_filepath)
         copy(tmp_uv_buffer.begin(), tmp_uv_buffer.end(), back_inserter(uv_buffer));
     }
 
-    if (current_gator_header.bone_count > 1)
+    if (include_bones)
     {
-        current_bin_size = bin_file.tellp();
         
-        // JOINTS
-        nlohmann::json joints_accessor;
-        joints_accessor["bufferView"] = buffer_view_count;
-        joints_accessor["componentType"] = 5121;
-        joints_accessor["count"] = current_gator_header.vert_count;
-        joints_accessor["type"] = "VEC4";
-        gltf_data["accessors"].push_back(joints_accessor);
-        bone_indices_index = accessor_count;
-        accessor_count++;
+        if (current_gator_header.bone_count > 1)
+        {
+            current_bin_size = bin_file.tellp();
+            
+            // JOINTS
+            nlohmann::json joints_accessor;
+            joints_accessor["bufferView"] = buffer_view_count;
+            joints_accessor["componentType"] = 5121;
+            joints_accessor["count"] = current_gator_header.vert_count;
+            joints_accessor["type"] = "VEC4";
+            gltf_data["accessors"].push_back(joints_accessor);
+            bone_indices_index = accessor_count;
+            accessor_count++;
 
-        nlohmann::json joints_buffer_views;
-        joints_buffer_views["byteLength"] = current_gator_header.vert_count * 4;
-        joints_buffer_views["buffer"] = 0;
-        joints_buffer_views["byteOffset"] = current_bin_size;
-        joints_buffer_views["target"] = 34962;
-        gltf_data["bufferViews"].push_back(joints_buffer_views);
-        bin_file.write(reinterpret_cast<const char*>(joints.data()),joints.size());
-        buffer_view_count++;
+            nlohmann::json joints_buffer_views;
+            joints_buffer_views["byteLength"] = current_gator_header.vert_count * 4;
+            joints_buffer_views["buffer"] = 0;
+            joints_buffer_views["byteOffset"] = current_bin_size;
+            joints_buffer_views["target"] = 34962;
+            gltf_data["bufferViews"].push_back(joints_buffer_views);
+            bin_file.write(reinterpret_cast<const char*>(joints.data()),joints.size());
+            buffer_view_count++;
 
-        // WEIGHTS
-        nlohmann::json weights_accessor;
-        weights_accessor["bufferView"] = buffer_view_count;
-        weights_accessor["componentType"] = 5121;
-        weights_accessor["count"] = current_gator_header.vert_count;
-        weights_accessor["type"] = "VEC4";
-        weights_accessor["normalized"] = true;
-        gltf_data["accessors"].push_back(weights_accessor);
-        weights_index = accessor_count;
-        accessor_count++;
+            // WEIGHTS
+            nlohmann::json weights_accessor;
+            weights_accessor["bufferView"] = buffer_view_count;
+            weights_accessor["componentType"] = 5121;
+            weights_accessor["count"] = current_gator_header.vert_count;
+            weights_accessor["type"] = "VEC4";
+            weights_accessor["normalized"] = true;
+            gltf_data["accessors"].push_back(weights_accessor);
+            weights_index = accessor_count;
+            accessor_count++;
 
-        current_bin_size = bin_file.tellp();
+            current_bin_size = bin_file.tellp();
 
-        nlohmann::json weights_buffer_views;
-        weights_buffer_views["byteLength"] = current_gator_header.vert_count * 4;
-        weights_buffer_views["buffer"] = 0;
-        weights_buffer_views["byteOffset"] = current_bin_size;
-        weights_buffer_views["target"] = 34962;
-        gltf_data["bufferViews"].push_back(weights_buffer_views);
-        bin_file.write(reinterpret_cast<const char*>(weights.data()),weights.size());
-        buffer_view_count++;
+            nlohmann::json weights_buffer_views;
+            weights_buffer_views["byteLength"] = current_gator_header.vert_count * 4;
+            weights_buffer_views["buffer"] = 0;
+            weights_buffer_views["byteOffset"] = current_bin_size;
+            weights_buffer_views["target"] = 34962;
+            gltf_data["bufferViews"].push_back(weights_buffer_views);
+            bin_file.write(reinterpret_cast<const char*>(weights.data()),weights.size());
+            buffer_view_count++;
+        }
     }
 
     // POSITIONS
@@ -380,8 +580,10 @@ vector<string> extract_model(string current_filepath)
     vertex_pos_accessor["bufferView"] = buffer_view_count;
     vertex_pos_accessor["componentType"] = 5126;
     vertex_pos_accessor["count"] = current_gator_header.vert_count;
+    
     vertex_pos_accessor["max"] = {current_gator_header.max_x,current_gator_header.max_y,current_gator_header.max_z};
     vertex_pos_accessor["min"] = {current_gator_header.min_x,current_gator_header.min_y,current_gator_header.min_z};
+    
     vertex_pos_accessor["type"] = "VEC3";
     gltf_data["accessors"].push_back(vertex_pos_accessor);
     vertex_position_index = accessor_count;
@@ -458,7 +660,7 @@ vector<string> extract_model(string current_filepath)
         
         // seek to the beginning of the next tstrip table
         src_file.clear();
-        src_file.seekg(current_gator_header.tstrip_table + (vert_header_size * i), ios::beg);
+        src_file.seekg(current_gator_header.tstrip_table + (face_table_section_size * i), ios::beg);
         tstrip_info current_tstrip;
         src_file.read(reinterpret_cast<char*>(&current_tstrip), sizeof(tstrip_info));
         
@@ -494,32 +696,36 @@ vector<string> extract_model(string current_filepath)
             {
                 if (k & 1)
                 {
-                    // makes sure every index is different before pushing it to the list
-                    vertex_indices.push_back(f3);
+                    vertex_indices.push_back(f1);
                     vert_indices++;
                     vertex_indices.push_back(f2);
                     vert_indices++;
-                    vertex_indices.push_back(f1);
+                    vertex_indices.push_back(f3);
                     vert_indices++;
                 }
                 else
                 {
-                    vertex_indices.push_back(f3);
+                    vertex_indices.push_back(f2);
                     vert_indices++;
                     vertex_indices.push_back(f1);
                     vert_indices++;
-                    vertex_indices.push_back(f2);
+                    vertex_indices.push_back(f3);
                     vert_indices++;
                 }
+                
             }
             
         }
         
-        if (current_gator_header.bone_count > 1)
+        if (include_bones)
         {
-            primitives["attributes"]["JOINTS_0"] = bone_indices_index;
-            primitives["attributes"]["WEIGHTS_0"] = weights_index;
+            if (current_gator_header.bone_count > 1)
+            {
+                primitives["attributes"]["JOINTS_0"] = bone_indices_index;
+                primitives["attributes"]["WEIGHTS_0"] = weights_index;
+            }
         }
+        
         primitives["attributes"]["POSITION"] = vertex_position_index;
         primitives["attributes"]["NORMAL"] = normals_index;
         if (!texture_list.empty())
@@ -626,7 +832,13 @@ vector<string> extract_model(string current_filepath)
     }
     gltf_data["meshes"].push_back(meshes);
     
+    #ifdef _DEBUG
     gltf_file << setw(4) << gltf_data;
+    
+    #else
+    gltf_file << gltf_data;
+    
+    #endif
 
     src_file.close();
     gltf_file.close();
@@ -638,10 +850,10 @@ vector<string> extract_model(string current_filepath)
 void m_extractor_loop()
 {
     // textbox for the output path
-    if (ImGui::InputText("gator files folder", gator_files_folder, IM_ARRAYSIZE(gator_files_folder)) || ImGui::InputText("output path", global_output_path, IM_ARRAYSIZE(global_output_path)))
+    if (ImGui::InputText("output path", global_output_path, IM_ARRAYSIZE(global_output_path)))
     {
         // each interaction with the textbox, it checks if the provided text is a valid path
-        valid_folders = folder_validation(gator_files_folder) && folder_validation(global_output_path);
+        valid_folders = folder_validation(global_output_path);
         combined_output_path = global_output_path;
         if (!combined_output_path.ends_with("\\"))combined_output_path+="\\";
     }
@@ -649,21 +861,6 @@ void m_extractor_loop()
     if (valid_folders)
     {
         ImGui::TextColored(ImVec4(0,1,0,1),"Valid folders");
-        ImGui::BeginChild("Gator files");
-        for (auto& dir_entry : filesystem::directory_iterator(gator_files_folder))
-        {
-            if (!dir_entry.path().filename().string().ends_with(".gator"))
-            {
-                continue;
-            }
-            string filename = dir_entry.path().filename().string();
-            if (ImGui::Selectable(filename.c_str()))
-            {
-                std::thread taskThread(extract_model, dir_entry.path().string());    // we don't pass the string as a reference, cause the name could change while extracting
-                taskThread.join();
-            }
-        }
-        ImGui::EndChild();
     }
     else
     {

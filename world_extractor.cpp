@@ -56,7 +56,7 @@ void extract_world()
         short some_offset;
         short values4;
         float f_values[12];
-        int values5;
+        int object_id;
     };
 
     for (auto &zone : jsonData["Zones"].items())
@@ -89,44 +89,45 @@ void extract_world()
             fld_file.read(reinterpret_cast<char*>(&fld_h),sizeof(fld_info));
             if (fld_h.texture_index > 0)
             {
-                size_t last_dot = to_string(jsonData["Materials"][to_string(fld_h.texture_index)]["base"]).find_last_of('.');
-                string mtl = to_string(jsonData["Materials"][to_string(fld_h.texture_index)]["base"]).substr(1,last_dot-1);
+            
+            size_t last_dot = to_string(jsonData["Materials"][to_string(fld_h.texture_index)]["base"]).find_last_of('.');
+            string mtl = to_string(jsonData["Materials"][to_string(fld_h.texture_index)]["base"]).substr(1,last_dot-1);
                 
-                size_t remember_position = fld_file.tellg();
+            remember_position = fld_file.tellg();
                     
-               fld_file.seekg(header.some_offset2 + fld_h.some_offset, ios::beg);
-               uint32_t offset;
-               fld_file.read(reinterpret_cast<char*>(&offset), sizeof(uint32_t));
-               fld_file.seekg(header.some_offset2+offset, ios::beg);
-               char c;
-               string filename;
-               while (fld_file.read(&c, 1)&& c != '\0')
-               {
-                   filename += c;
-               }
-               obj_file << "g " << filename << "\nusemtl " << mtl << "\n";
+            fld_file.seekg(header.some_offset2 + fld_h.some_offset, ios::beg);
+            uint32_t offset;
+            fld_file.read(reinterpret_cast<char*>(&offset), sizeof(uint32_t));
+            fld_file.seekg(header.some_offset2+offset, ios::beg);
+            char c;
+            string filename;
+            while (fld_file.read(&c, 1)&& c != '\0')
+            {
+                filename += c;
+            }
+            obj_file << "g " << filename << "\nusemtl " << mtl << "\n";
 
-               fld_file.clear();
-               fld_file.seekg(remember_position, ios::beg);
+            fld_file.clear();
+            fld_file.seekg(remember_position, ios::beg);
                 
-                bool found = any_of(material_list.begin(), material_list.end(),[&mtl](const std::string& s)
+            bool found = any_of(material_list.begin(), material_list.end(),[&mtl](const std::string& s)
+            {
+                return s == mtl;
+            });
+            if (!found)
+            {
+                if (!mtl.ends_with("ull"))
                 {
-                    return s == mtl;
-                });
-                if (!found)
-                {
-                    if (!mtl.ends_with("ull"))
-                    {
-                        mtl_file << "newmtl " << mtl << "\n";
-                        mtl_file << "map_Kd " << mtl << ".png" << "\n";
-                        mtl_file << "map_d " << mtl << ".png" << "\n";
-                    }
-                    else
-                    {
-                        mtl_file << "newmtl Null" << "\n";
-                    }
-                    material_list.push_back(mtl);
+                    mtl_file << "newmtl " << mtl << "\n";
+                    mtl_file << "map_Kd " << mtl << ".png" << "\n";
+                    mtl_file << "map_d " << mtl << ".png" << "\n";
                 }
+                else
+                {
+                    mtl_file << "newmtl Null" << "\n";
+                }
+                material_list.push_back(mtl);
+            }
             }
             
             if (fld_h.strip_indices_amount > 0)

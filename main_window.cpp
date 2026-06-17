@@ -1,10 +1,7 @@
-﻿#include <iostream>
-#include <imgui.h>
+﻿#include <imgui.h>
 #include "repacking.h"
-#include "model_extractor.h"
 #include "main_window.h"
 #include "hot_extractor.h"
-#include "world_extractor.h"
 #include <filesystem>
 
 void init_main()
@@ -35,24 +32,12 @@ void main_loop()
             hot_extractor_loop();
             ImGui::EndTabItem();
         }
-        /*
-        if (ImGui::BeginTabItem("world converter"))
-        {
-            world_extractor_loop();
-            ImGui::EndTabItem();
-        }*/
         if (ImGui::BeginTabItem("Repacker"))
         {
             repack_loop();
             ImGui::EndTabItem();
         }
-        /*
-        if (ImGui::BeginTabItem("Model extractor"))
-        {
-            m_extractor_loop();
-            ImGui::EndTabItem();
-        }
-        */
         ImGui::EndTabBar();
+        
     }
 }

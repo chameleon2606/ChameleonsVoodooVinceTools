@@ -138,7 +138,8 @@ void glb_compressor(vector<model_info>&models)
 {
     for (auto& model : models)
     {
-        string pathstring = global_output_path;
+        //string pathstring = global_output_path;
+        string pathstring = combined_output_path;
         pathstring+=model.name;
         
         ifstream gltf_file(pathstring+".gltf", ios::binary);
@@ -168,7 +169,8 @@ void glb_compressor(vector<model_info>&models)
         {
             // opens the texture
             size_t last_dot = model.textures[i].find_last_of('.');
-            string texture_path = global_output_path;
+            //string texture_path = global_output_path;
+            string texture_path = combined_output_path;
             texture_path+=model.textures[i].substr(0, last_dot)+".png";
             ifstream texture_file(texture_path, ios::binary);
             
@@ -291,7 +293,7 @@ void glb_compressor(vector<model_info>&models)
         for (const auto& texture : model.textures)
         {
             size_t last_dot = texture.find_last_of('.');
-            string pathstring = global_output_path;
+            string pathstring = combined_output_path;
             pathstring+= texture.substr(0, last_dot)+".png";
             
             if (filesystem::exists(pathstring)&&delete_extracted_file){remove(pathstring.c_str());}
@@ -521,7 +523,6 @@ void extract_hot_file(string* filepath)
             ofstream json_file(combined_output_path+"index.json");
             json_file << parse_tdf(output_path);
             json_file.close();
-            //parse_tdf(output_path);
         }
         if (output_file.is_open()){output_file.close();}
     }
@@ -575,6 +576,7 @@ void hot_extractor_loop()
         ImGui::Checkbox("delete extracted and converted files", &delete_extracted_file);
         ImGui::SetItemTooltip("DirectX uses row-major matrices, OpenGL (blender) uses col-major");
         ImGui::Checkbox("Pack models and textures into .glb files", &model_compression);
+        ImGui::Checkbox("Include Bones / Rigging data", &include_bones);
         ImGui::SetItemTooltip("May take longer to extract");
         /*
         ImGui::RadioButton("Remastered", &is_remastered, 0);
@@ -589,6 +591,7 @@ void hot_extractor_loop()
         valid_output_dir = filesystem::exists(global_output_path);
         combined_output_path = global_output_path;
         if (!combined_output_path.ends_with("\\"))combined_output_path+="\\";
+        std::cout << combined_output_path << std::endl;
     }
     
     if (!valid_output_dir)
