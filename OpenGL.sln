@@ -1,6 +1,6 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "OpenGL", "OpenGL.vcxproj", "{10F6FA8D-DB20-40B4-9B79-D52C92222C27}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ChameleonsVoodooTools", "ChameleonsVoodooTools.vcxproj", "{10F6FA8D-DB20-40B4-9B79-D52C92222C27}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

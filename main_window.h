@@ -12,7 +12,7 @@ static char global_output_path[128] = "";
 #endif
 inline bool dds_convert = true;
 inline bool delete_extracted_file = true;
-inline bool convert_level_bsp = true;
+inline bool convert_level_bsp = false;
 inline bool model_compression = true;
 inline bool include_bones = true;
 inline bool convert_world = true;

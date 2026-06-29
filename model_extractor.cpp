@@ -10,6 +10,7 @@
 #include "GLFW/glfw3.h"
 #include "main_window.h"
 #include "include/json.hpp"
+#include "hot_extractor.h"
 
 using namespace std;
 
@@ -25,7 +26,7 @@ struct gator_header
     char magic[4];
     uint32_t version, thing, thing2, vert_count, tri_count, tstrip_count, material_count, bone_count;
     int16_t thing5, thing6;
-    uint16_t thing7, thing8, bone_joints_count, string_count;
+    uint16_t thing7, hitbox_points, bone_joints_count, string_count;
     uint32_t start_of_verts, start_of_tris, tstrip_table, materials_offset, hitbox_data_offset, bones_table, bone_joints_offset, string_offsets, string_lookup_table;
     float min_x, min_y, min_z, max_x, max_y, max_z, thing16, thing17, thing18, thing19, thing20;
 };
@@ -71,6 +72,13 @@ struct bones_data
 struct bone_joint_info
 {
     uint32_t size, offset;
+};
+struct bsp_header
+{
+    char signature[4];
+    uint32_t version;
+    uint32_t file_size;
+    
 };
 
 bool folder_validation(char folder[])
@@ -231,7 +239,6 @@ vector<string> extract_model(string current_filepath)
             bones.push_back(current_bone);
             bone_parent_list.push_back(current_bone.parent_index);
         }
-        
         
         
         // build the index lookup
@@ -831,6 +838,27 @@ vector<string> extract_model(string current_filepath)
         gltf_data["materials"].push_back(material);
     }
     gltf_data["meshes"].push_back(meshes);
+    
+    // converts the hitbox into a model
+    if (convert_level_bsp && !current_gator_header.hitbox_points && current_gator_header.hitbox_data_offset != current_gator_header.bones_table)
+    {
+        bsp_header current_bsp_header;
+        src_file.seekg(current_gator_header.hitbox_data_offset, ios::beg);
+        src_file.read(reinterpret_cast<char*>(&current_bsp_header), sizeof(bsp_header));
+        
+        vector<char> bsp_content(current_bsp_header.file_size);
+        src_file.seekg(current_gator_header.hitbox_data_offset, ios::beg);
+        src_file.read(bsp_content.data(), bsp_content.size());
+        
+        ofstream hitbox_file(combined_output_path+"\\"+current_filename + " collision.bsp",ios::binary | ios::trunc);
+        hitbox_file.write(bsp_content.data(), bsp_content.size());
+        hitbox_file.close();
+        
+        string bsp_path = combined_output_path+"\\"+current_filename + " collision.bsp";
+        string bsp_name = current_filename;
+        bsp_converter(bsp_path, bsp_name);
+    }
+    
     
     #ifdef _DEBUG
     gltf_file << setw(4) << gltf_data;

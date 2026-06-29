@@ -75,7 +75,7 @@ void dds_to_png(string& path, string& name)
     FreeImage_DeInitialise();
 }
 
-void bsp_converter(string &bsp_path)
+void bsp_converter(string &bsp_path, string &filename)
 {
     struct verts_structure
     {
@@ -99,7 +99,7 @@ void bsp_converter(string &bsp_path)
     bsp_header current_bsp_header;
     
     ifstream bsp_file(bsp_path, ios::binary);
-    ofstream hitbox_file(combined_output_path + "collision.obj");
+    ofstream hitbox_file(combined_output_path + filename + "_collision.obj");
 
     bsp_file.read(reinterpret_cast<char*>(&current_bsp_header), sizeof(bsp_header));
     // seeks to the section of the vertex data
@@ -125,7 +125,6 @@ void bsp_converter(string &bsp_path)
     hitbox_file.close();
     if (delete_extracted_file)
     {
-        cout << bsp_path << "\n";
         remove(bsp_path.c_str());
         if (!remove(bsp_path.c_str()))
         {
@@ -474,7 +473,9 @@ void extract_hot_file(string* filepath)
         {
             string bsp_path = combined_output_path+filename;
             output_file.close();
-            bsp_converter(bsp_path);
+            //string bsp_name = combined_output_path;
+            string bsp_name = "level";
+            bsp_converter(bsp_path, bsp_name);
         }
         if (current_filename == "models")
         {
@@ -582,7 +583,7 @@ void hot_extractor_loop()
         ImGui::RadioButton("Remastered", &is_remastered, 0);
         ImGui::RadioButton("Original", &is_remastered, 1);
         */
-        ImGui::Checkbox("extract level colliders", &convert_level_bsp);
+        ImGui::Checkbox("extract colliders", &convert_level_bsp);
         ImGui::Checkbox("convert world data to 3D model", &convert_world);
         ImGui::TreePop();
     }

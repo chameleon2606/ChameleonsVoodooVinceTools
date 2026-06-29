@@ -13,6 +13,9 @@ using namespace std;
 char vertices_path[128] = "C:\\Users\\leong\\Desktop\\vince stuff\\output\\vertices.raw";
 char index_path[128] = "C:\\Users\\leong\\Desktop\\vince stuff\\output\\index.json";
 size_t remember_position = 0;
+int32_t last_object = -1;
+string last_filename = "";
+string last_mtl = "";
 
 void extract_world()
 {
@@ -36,7 +39,7 @@ void extract_world()
         int16_t first_section;
         int16_t values2[3];
         uint32_t some_offset1;
-        uint32_t some_offset2;
+        uint32_t string_index_offset;
     };
     struct fld_info
     {
@@ -51,7 +54,7 @@ void extract_world()
         int header_size;
         int tstrip_size;
         int raw_file_offset;
-        int raw_file_offset_offset;
+        uint32_t raw_file_offset_offset;
         int raw_u_offset;
         short some_offset;
         short values4;
@@ -84,50 +87,64 @@ void extract_world()
         vector<string>material_list;
         while (pos <= header.last_header)
         {
-            cout << "pos: " << pos << "\n";
-            obj_file << "o " << pos << "\n";
             fld_file.read(reinterpret_cast<char*>(&fld_h),sizeof(fld_info));
+            
+            if (fld_h.object_id > last_object)
+            {
+                last_object = fld_h.object_id;
+                obj_file << "g " << fld_h.object_id << "\n";
+            }
+            
             if (fld_h.texture_index > 0)
             {
             
-            size_t last_dot = to_string(jsonData["Materials"][to_string(fld_h.texture_index)]["base"]).find_last_of('.');
-            string mtl = to_string(jsonData["Materials"][to_string(fld_h.texture_index)]["base"]).substr(1,last_dot-1);
-                
-            remember_position = fld_file.tellg();
+                size_t last_dot = to_string(jsonData["Materials"][to_string(fld_h.texture_index)]["base"]).find_last_of('.');
+                string mtl = to_string(jsonData["Materials"][to_string(fld_h.texture_index)]["base"]).substr(1,last_dot-1);
                     
-            fld_file.seekg(header.some_offset2 + fld_h.some_offset, ios::beg);
-            uint32_t offset;
-            fld_file.read(reinterpret_cast<char*>(&offset), sizeof(uint32_t));
-            fld_file.seekg(header.some_offset2+offset, ios::beg);
-            char c;
-            string filename;
-            while (fld_file.read(&c, 1)&& c != '\0')
-            {
-                filename += c;
-            }
-            obj_file << "g " << filename << "\nusemtl " << mtl << "\n";
+                remember_position = fld_file.tellg();
+                        
+                fld_file.seekg(header.string_index_offset + fld_h.some_offset, ios::beg);
+                uint32_t offset;
+                fld_file.read(reinterpret_cast<char*>(&offset), sizeof(uint32_t));
+                fld_file.seekg(header.string_index_offset+offset, ios::beg);
+                char c;
+                string filename;
+                while (fld_file.read(&c, 1)&& c != '\0')
+                {
+                    filename += c;
+                }
+                if (last_filename != filename)
+                {
+                    obj_file << "o " << mtl << "\n";
+                    last_filename = filename;
+                }
+                if (last_mtl != mtl)
+                {
+                    obj_file << "usemtl " << mtl << "\n";
+                    last_mtl = mtl;
+                }
 
-            fld_file.clear();
-            fld_file.seekg(remember_position, ios::beg);
-                
-            bool found = any_of(material_list.begin(), material_list.end(),[&mtl](const std::string& s)
-            {
-                return s == mtl;
-            });
-            if (!found)
-            {
-                if (!mtl.ends_with("ull"))
+                fld_file.clear();
+                fld_file.seekg(remember_position, ios::beg);
+                    
+                bool found = any_of(material_list.begin(), material_list.end(),[&mtl](const std::string& s)
                 {
-                    mtl_file << "newmtl " << mtl << "\n";
-                    mtl_file << "map_Kd " << mtl << ".png" << "\n";
-                    mtl_file << "map_d " << mtl << ".png" << "\n";
-                }
-                else
+                    return s == mtl;
+                });
+                if (!found)
                 {
-                    mtl_file << "newmtl Null" << "\n";
+                    if (!mtl.ends_with("ull"))
+                    {
+                        mtl_file << "newmtl " << mtl << "\n";
+                        mtl_file << "map_Kd " << mtl << ".png" << "\n";
+                        mtl_file << "map_d " << mtl << ".png" << "\n";
+                    }
+                    else
+                    {
+                        mtl_file << "newmtl Null" << "\n";
+                    }
+                    material_list.push_back(mtl);
                 }
-                material_list.push_back(mtl);
-            }
             }
             
             if (fld_h.strip_indices_amount > 0)
@@ -190,17 +207,10 @@ void extract_world()
                 vector<uint32_t>u_buffer(fld_h.other_data_amount);
                 fld_file.read(reinterpret_cast<char*>(u_buffer.data()),u_buffer.size()*sizeof(uint32_t));
             }
-            
-            // ts doesn't work correctly
-            // comment this out, if world extraction crashes
-            /*
-            else if (fld_h.values1 > 0 && fld_h.texture_index > 0)
+            else if (fld_h.object_id < 0)
             {
-                buffer_data = fld_h.values1 * 4.0;
-                vector<uint32_t>u_buffer(fld_h.values1);
-                fld_file.read(reinterpret_cast<char*>(u_buffer.data()),u_buffer.size()*sizeof(uint32_t));
+                break;
             }
-            */
             else
             {
                 pos = fld_file.tellg();
