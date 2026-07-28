@@ -17,7 +17,8 @@ extern "C"{
 
 using namespace std;
 
-constexpr uint8_t hot_header_size = 36;
+constexpr uint8_t remastered_hot_header_size = 36;
+constexpr uint8_t og_hot_header_size = 32;
 bool valid_output_dir = false;
 vector<string> texture_list;
 
@@ -32,16 +33,36 @@ struct hot_header
     uint32_t file_count;
     uint32_t reserved[2];
 };
+struct og_hot_header
+{
+    char signature[4];
+    uint32_t version;
+    uint32_t headers_offset;
+    uint32_t data_offset;
+    uint32_t file_overall_size;
+    uint32_t file_name_table_offset;
+    uint32_t file_count;
+    uint32_t reserved;
+};
 struct remastered_file_info
 {
     uint32_t header_size;
     uint32_t header_offset;
-    uint32_t uncompressed_size;
+    uLongf uncompressed_size;
     uint32_t compressed_size;
     uint32_t raw_file_offset;
     uint32_t reserved1;
     uint32_t next_name_offset;
     uint32_t reserved2;
+};
+struct og_file_info
+{
+    uint32_t header_size;
+    uint32_t header_offset;
+    uLongf uncompressed_size;
+    uint32_t compressed_size;
+    uint32_t raw_file_offset;
+    uint32_t next_name_offset;
 };
 struct model_info
 {
@@ -137,7 +158,6 @@ void glb_compressor(vector<model_info>&models)
 {
     for (auto& model : models)
     {
-        //string pathstring = global_output_path;
         string pathstring = combined_output_path;
         pathstring+=model.name;
         
@@ -159,7 +179,7 @@ void glb_compressor(vector<model_info>&models)
         ofstream glb_file(pathstring+".glb", ios::binary | ios::trunc);
         if (!glb_file.is_open())
         {
-            cout << "failed to open glb file " << pathstring << "\n";
+            cout << "failed to create glb file " << pathstring << "\n";
         }
         
         vector<char> texture_buffer;
@@ -309,19 +329,65 @@ void extract_textures(string filepath, vector<string>*textures)
         return;
     }
     
-    hot_header current_hot_header;
+    // struct variables
+    uint32_t file_name_table_offset;
+    uint32_t file_count;
+    
+    textures_file.clear();
     textures_file.seekg(0, ios::beg);
-    textures_file.read(reinterpret_cast<char*>(&current_hot_header), sizeof(hot_header));
+    if (is_remastered)
+    {
+        hot_header current_hot_header;
+        textures_file.read(reinterpret_cast<char*>(&current_hot_header), sizeof(hot_header));
+        
+        file_name_table_offset = current_hot_header.file_name_table_offset;
+        file_count = current_hot_header.file_count;
+    }
+    else
+    {
+        og_hot_header current_hot_header;
+        textures_file.read(reinterpret_cast<char*>(&current_hot_header), sizeof(og_hot_header));
+        
+        file_name_table_offset = current_hot_header.file_name_table_offset;
+        file_count = current_hot_header.file_count;
+    }
 
     uint32_t last_file_name_offset = 0;
-    for (uint32_t i = 0; i < current_hot_header.file_count; i++)
+    for (uint32_t i = 0; i < file_count; i++)
     {
-        remastered_file_info current_file_info;
-        textures_file.seekg(hot_header_size+(sizeof(remastered_file_info)*i), ios::beg);
-        textures_file.read(reinterpret_cast<char*>(&current_file_info), sizeof(remastered_file_info));
+        uint32_t header_size;
+        uint32_t header_offset;
+        uint32_t uncompressed_size;
+        uint32_t raw_file_offset;
+        uint32_t next_name_offset;
+        if (is_remastered)
+        {
+            remastered_file_info current_file_info;
+            textures_file.seekg(remastered_hot_header_size+(sizeof(remastered_file_info)*i), ios::beg);
+            textures_file.read(reinterpret_cast<char*>(&current_file_info), sizeof(remastered_file_info));
+            
+            header_size = current_file_info.header_size;
+            header_offset = current_file_info.header_offset;
+            uncompressed_size = current_file_info.uncompressed_size;
+            raw_file_offset = current_file_info.raw_file_offset;
+            next_name_offset = current_file_info.next_name_offset;
+        }
+        else
+        {
+            og_file_info current_file_info;
+            textures_file.seekg(og_hot_header_size+(sizeof(og_file_info)*i), ios::beg);
+            textures_file.read(reinterpret_cast<char*>(&current_file_info), sizeof(og_file_info));
+            
+            header_size = current_file_info.header_size;
+            header_offset = current_file_info.header_offset;
+            uncompressed_size = current_file_info.uncompressed_size;
+            raw_file_offset = current_file_info.raw_file_offset;
+            next_name_offset = current_file_info.next_name_offset;
+        }
+        
 
-        textures_file.seekg(current_hot_header.file_name_table_offset + last_file_name_offset, ios::beg);
-        last_file_name_offset = current_file_info.next_name_offset;
+        textures_file.seekg(file_name_table_offset + last_file_name_offset, ios::beg);
+        last_file_name_offset = next_name_offset;
 
         char c;
         string filename;
@@ -337,21 +403,21 @@ void extract_textures(string filepath, vector<string>*textures)
             continue;
         }
         // reading the raw data of the new file but not writing it yet
-        vector<char> data_buffer(current_file_info.uncompressed_size-current_file_info.header_size);
+        vector<char> data_buffer(uncompressed_size-header_size);
         textures_file.clear();
-        textures_file.seekg(current_file_info.raw_file_offset);
-        textures_file.read(data_buffer.data(), current_file_info.uncompressed_size-current_file_info.header_size);
+        textures_file.seekg(raw_file_offset);
+        textures_file.read(data_buffer.data(), uncompressed_size-header_size);
 
         // creating the new file
         ofstream output_file(combined_output_path+filename, ios::binary, ios::trunc);
 
         textures_file.clear();
-        textures_file.seekg(current_file_info.header_offset, ios::beg);
-        vector<char> header_buffer(current_file_info.header_size);
-        textures_file.read(header_buffer.data(), current_file_info.header_size);
-        output_file.write(header_buffer.data(), current_file_info.header_size);
+        textures_file.seekg(header_offset, ios::beg);
+        vector<char> header_buffer(header_size);
+        textures_file.read(header_buffer.data(), header_size);
+        output_file.write(header_buffer.data(), header_size);
 
-        output_file.write(data_buffer.data(), current_file_info.uncompressed_size-current_file_info.header_size);
+        output_file.write(data_buffer.data(), uncompressed_size-header_size);
 
         output_file.close();
 
@@ -363,7 +429,6 @@ void extract_textures(string filepath, vector<string>*textures)
 
 void extract_hot_file(string* filepath)
 {
-    // variables
     ifstream src_file(*filepath, ios::binary);
     if (!src_file.is_open())
     {
@@ -371,31 +436,88 @@ void extract_hot_file(string* filepath)
         return;
     }
     
+    // get filename as string
     size_t last_slash = filepath->find_last_of('\\');
     string current_filename = filepath->substr(last_slash+1, filepath->size()-last_slash);
     size_t last_dot = current_filename.find_last_of('.');
     current_filename = current_filename.substr(0,last_dot);
     
-    hot_header current_hot_header;
+    uint32_t headers_offset;
+    uint32_t data_offset;
+    uint32_t file_name_table_offset;
+    uint32_t file_count;
+    
     src_file.clear();
     src_file.seekg(0, ios::beg);
-    src_file.read(reinterpret_cast<char*>(&current_hot_header), sizeof(hot_header));
+    if (is_remastered)
+    {
+        hot_header current_hot_header;
+        src_file.read(reinterpret_cast<char*>(&current_hot_header), sizeof(hot_header));
+        
+        // struct variables
+        headers_offset = current_hot_header.headers_offset;
+        data_offset = current_hot_header.data_offset;
+        file_name_table_offset = current_hot_header.file_name_table_offset;
+        file_count = current_hot_header.file_count;
+    }
+    else
+    {
+        og_hot_header current_hot_header;
+        src_file.read(reinterpret_cast<char*>(&current_hot_header), sizeof(og_hot_header));
+        
+        // struct variables
+        headers_offset = current_hot_header.headers_offset;
+        data_offset = current_hot_header.data_offset;
+        file_name_table_offset = current_hot_header.file_name_table_offset;
+        file_count = current_hot_header.file_count;
+    }
+    
 
-    vector<model_info> models(current_hot_header.file_count);
+    vector<model_info> models(file_count);
     
     uint32_t last_file_name_offset = 0;
-    for (uint32_t i = 0; i < current_hot_header.file_count; i++)
+    for (uint32_t i = 0; i < file_count; i++)
     {
-        // read the current file info table
-        remastered_file_info current_file_info;
         src_file.clear();   // we have to call this or seeking might not work correctly
-        src_file.seekg(hot_header_size+(sizeof(remastered_file_info)*i), ios::beg);
-        src_file.read(reinterpret_cast<char*>(&current_file_info), sizeof(remastered_file_info));
+        
+        uint32_t header_size;
+        uint32_t header_offset;
+        uLongf uncompressed_size;
+        uint32_t compressed_size;
+        uint32_t raw_file_offset;
+        uint32_t next_name_offset;
+        
+        if (is_remastered)
+        {
+            remastered_file_info current_file_info;
+            src_file.seekg(remastered_hot_header_size+(sizeof(remastered_file_info)*i), ios::beg);
+            src_file.read(reinterpret_cast<char*>(&current_file_info), sizeof(remastered_file_info));
+            
+            header_size = current_file_info.header_size;
+            header_offset = current_file_info.header_offset;
+            uncompressed_size = current_file_info.uncompressed_size;
+            compressed_size = current_file_info.compressed_size;
+            raw_file_offset = current_file_info.raw_file_offset;
+            next_name_offset = current_file_info.next_name_offset;
+        }
+        else
+        {
+            og_file_info current_file_info;
+            src_file.seekg(og_hot_header_size+(sizeof(og_file_info)*i), ios::beg);
+            src_file.read(reinterpret_cast<char*>(&current_file_info), sizeof(og_file_info));
+            
+            header_size = current_file_info.header_size;
+            header_offset = current_file_info.header_offset;
+            uncompressed_size = current_file_info.uncompressed_size;
+            compressed_size = current_file_info.compressed_size;
+            raw_file_offset = current_file_info.raw_file_offset;
+            next_name_offset = current_file_info.next_name_offset;
+        }
 
         // read the filename for the current file
         src_file.clear();
-        src_file.seekg(current_hot_header.file_name_table_offset + last_file_name_offset, ios::beg);
-        last_file_name_offset = current_file_info.next_name_offset;
+        src_file.seekg(file_name_table_offset + last_file_name_offset, ios::beg);
+        last_file_name_offset = next_name_offset;
         char c;
         string filename;
         while (src_file.read(&c, 1)&& c != '\0')
@@ -405,13 +527,14 @@ void extract_hot_file(string* filepath)
         string file_to_extract = combined_output_path+filename;
 
         // reading the raw data of the new file but not writing it yet
-        vector<char> data_buffer(current_file_info.uncompressed_size-current_file_info.header_size);
+        vector<char> data_buffer(uncompressed_size-header_size);
         src_file.clear();
-        src_file.seekg(current_file_info.raw_file_offset);
-        src_file.read(data_buffer.data(), current_file_info.uncompressed_size-current_file_info.header_size);
+        src_file.seekg(raw_file_offset);
+        src_file.read(data_buffer.data(), uncompressed_size-header_size);
 
         string output_path;
         // creating the new file
+        
         if (filename == "models.hot")
         {
             last_slash = filepath->find_last_of('\\');
@@ -421,25 +544,25 @@ void extract_hot_file(string* filepath)
         {
             output_path = combined_output_path+filename;
         }
+        
         ofstream output_file(output_path, ios::binary, ios::trunc);
         
-        if (current_hot_header.headers_offset != current_hot_header.data_offset)    // file has a header
+        if (headers_offset != data_offset)    // file has a header
         {
             src_file.clear();
-            src_file.seekg(current_file_info.header_offset, ios::beg);
-            vector<char> header_buffer(current_file_info.header_size);
-            src_file.read(header_buffer.data(), current_file_info.header_size);
-            output_file.write(header_buffer.data(), current_file_info.header_size);
+            src_file.seekg(header_offset, ios::beg);
+            vector<char> header_buffer(header_size);
+            src_file.read(header_buffer.data(), header_size);
+            output_file.write(header_buffer.data(), header_size);
         }
-        if (current_file_info.compressed_size == 0) // writes uncompressed data
+        if (compressed_size == 0) // writes uncompressed data
         {
-            output_file.write(data_buffer.data(), current_file_info.uncompressed_size-current_file_info.header_size);
+            output_file.write(data_buffer.data(), uncompressed_size-header_size);
         }
         else   // reads compressed data, decompresses it, and writes it
         {
-            uLongf uncompressed_size = current_file_info.uncompressed_size;
             vector<char> uncompressed_data(uncompressed_size);
-            int ret = uncompress(reinterpret_cast<Bytef*>(uncompressed_data.data()), &uncompressed_size, reinterpret_cast<const Bytef*>(data_buffer.data()), current_file_info.compressed_size);
+            int ret = uncompress(reinterpret_cast<Bytef*>(uncompressed_data.data()), &uncompressed_size, reinterpret_cast<const Bytef*>(data_buffer.data()), compressed_size);
             if (ret != Z_OK)
             {
                 cerr << "uncompress error " << ret << "\n";
@@ -448,7 +571,7 @@ void extract_hot_file(string* filepath)
             }
             
             // writing uncompressed data
-            output_file.write(uncompressed_data.data(), current_file_info.uncompressed_size);
+            output_file.write(uncompressed_data.data(), uncompressed_size);
             output_file.close();
             
             if (filename == "models.hot")
@@ -505,7 +628,7 @@ void extract_hot_file(string* filepath)
                 });
             });
 
-            if (i == current_hot_header.file_count-1)
+            if (i == file_count-1)
             {
                 last_slash = filepath->find_last_of('\\');
                 if (!filepath->substr(0, last_slash).ends_with("common"))
@@ -575,16 +698,17 @@ void hot_extractor_loop()
     if (ImGui::TreeNodeEx("Options"))
     {
         ImGui::Checkbox("delete extracted and converted files", &delete_extracted_file);
-        ImGui::SetItemTooltip("DirectX uses row-major matrices, OpenGL (blender) uses col-major");
         ImGui::Checkbox("Pack models and textures into .glb files", &model_compression);
+        ImGui::SetItemTooltip("this creates a single file for the 3D model");
         ImGui::Checkbox("Include Bones / Rigging data", &include_bones);
-        ImGui::SetItemTooltip("May take longer to extract");
-        /*
-        ImGui::RadioButton("Remastered", &is_remastered, 0);
-        ImGui::RadioButton("Original", &is_remastered, 1);
-        */
         ImGui::Checkbox("extract colliders", &convert_level_bsp);
+        ImGui::SetItemTooltip("extracts the collision 3D model for the level and 3D models");
         ImGui::Checkbox("convert world data to 3D model", &convert_world);
+        ImGui::SetItemTooltip("this isn't flawless yet and might crash on extraction");
+        
+        ImGui::RadioButton("Remastered", &is_remastered, 1);
+        ImGui::RadioButton("Original", &is_remastered, 0);
+        
         ImGui::TreePop();
     }
     if (ImGui::InputText("Output path", global_output_path, IM_ARRAYSIZE(global_output_path)))

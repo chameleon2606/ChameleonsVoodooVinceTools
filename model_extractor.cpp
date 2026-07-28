@@ -444,7 +444,8 @@ vector<string> extract_model(string current_filepath)
     }
 
     // loop through each vertex data section
-    for (uint32_t i=0; i < current_gator_header.vert_count; i++)
+    uint32_t pos = 0;
+    for (uint32_t i=0; pos < current_gator_header.start_of_tris; i++)
     {
         src_file.seekg(current_gator_header.start_of_verts +(sizeof(vert_info)*i), ios::beg);
         
@@ -452,37 +453,16 @@ vector<string> extract_model(string current_filepath)
 
         // grabs all data for that vertex
         src_file.read(reinterpret_cast<char*>(&current_verts), sizeof(vert_info));
-
+        
         if (include_bones)
         {
             if (current_gator_header.bone_joints_offset)
             {
                 //writes bone indices
                 joints.push_back(joint_lists[joints_map[i]][current_verts.bone1_index]);
-                if (current_verts.bone2_index > 0)
-                {
-                    joints.push_back(joint_lists[joints_map[i]][current_verts.bone2_index]);
-                }
-                else
-                {
-                    joints.push_back(0);
-                }
-                if (current_verts.bone3_index > 0)
-                {
-                    joints.push_back(joint_lists[joints_map[i]][current_verts.bone3_index]);
-                }
-                else
-                {
-                    joints.push_back(0);
-                }
-                if (current_verts.bone4_index > 0)
-                {
-                    joints.push_back(joint_lists[joints_map[i]][current_verts.bone4_index]);
-                }
-                else
-                {
-                    joints.push_back(0);
-                }
+                joints.push_back(joint_lists[joints_map[i]][current_verts.bone2_index]);
+                joints.push_back(joint_lists[joints_map[i]][current_verts.bone3_index]);
+                joints.push_back(joint_lists[joints_map[i]][current_verts.bone4_index]);
             }
             else
             {
@@ -529,6 +509,8 @@ vector<string> extract_model(string current_filepath)
         vector<char>tmp_uv_buffer(2*sizeof(float));
         src_file.read(tmp_uv_buffer.data(), tmp_uv_buffer.size());
         copy(tmp_uv_buffer.begin(), tmp_uv_buffer.end(), back_inserter(uv_buffer));
+        
+        pos = src_file.tellg();
     }
 
     if (include_bones)
@@ -895,4 +877,3 @@ void m_extractor_loop()
         ImGui::TextColored(ImVec4(1,0,0,1),"Invalid folders");
     }
 }
-
