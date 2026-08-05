@@ -671,7 +671,6 @@ vector<string> extract_model(string current_filepath)
         vector<uint16_t> strip(current_tstrip.verts_in_strip);
         src_file.read(reinterpret_cast<char*>(strip.data()), current_tstrip.verts_in_strip * sizeof(uint16_t));
         
-        int vert_indices = 0;
         vector<uint16_t>vertex_indices;
 
         // goes through each 16bit int value, takes it's value and the 2 following values and stores them in a list
@@ -686,24 +685,16 @@ vector<string> extract_model(string current_filepath)
                 if (k & 1)
                 {
                     vertex_indices.push_back(f1);
-                    vert_indices++;
                     vertex_indices.push_back(f2);
-                    vert_indices++;
                     vertex_indices.push_back(f3);
-                    vert_indices++;
                 }
                 else
                 {
                     vertex_indices.push_back(f2);
-                    vert_indices++;
                     vertex_indices.push_back(f1);
-                    vert_indices++;
                     vertex_indices.push_back(f3);
-                    vert_indices++;
                 }
-                
             }
-            
         }
         
         if (include_bones)
@@ -727,7 +718,7 @@ vector<string> extract_model(string current_filepath)
         nlohmann::json index_accessor;
         index_accessor["bufferView"] = buffer_view_count;
         index_accessor["componentType"] = 5123;
-        index_accessor["count"] = vert_indices;
+        index_accessor["count"] = vertex_indices.size();
         index_accessor["type"] = "SCALAR";
         gltf_data["accessors"].push_back(index_accessor);
         accessor_count++;
@@ -736,7 +727,7 @@ vector<string> extract_model(string current_filepath)
         bin_file.write(reinterpret_cast<const char*>(vertex_indices.data()),vertex_indices.size() * sizeof(uint16_t));
     
         nlohmann::json indices_buffer_views;
-        indices_buffer_views["byteLength"] = vert_indices * sizeof(uint16_t);
+        indices_buffer_views["byteLength"] = vertex_indices.size() * sizeof(uint16_t);
         indices_buffer_views["buffer"] = 0;
         indices_buffer_views["byteOffset"] = current_bin_size;
         indices_buffer_views["target"] = 34963;
@@ -760,7 +751,7 @@ vector<string> extract_model(string current_filepath)
     {
         nlohmann::json sampler;
         sampler["magFilter"] = 9729;
-        sampler["minFilter"] = 9729;
+        sampler["minFilter"] = 9987;
         gltf_data["samplers"].push_back(sampler);
         for (size_t i = 0; i < texture_list.size(); i++)
         {

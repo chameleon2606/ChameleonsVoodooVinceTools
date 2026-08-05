@@ -165,6 +165,7 @@ void glb_compressor(vector<model_info>&models)
         if (!gltf_file.is_open())
         {
             cout << "failed to open gltf file " << pathstring << "\n";
+            return;
         }
         nlohmann::json gltf_json;
         gltf_json = nlohmann::json::parse(gltf_file);
@@ -174,12 +175,14 @@ void glb_compressor(vector<model_info>&models)
         if (!binary_file.is_open())
         {
             cout << "failed to open bin file " << pathstring << "\n";
+            return;
         }
         
         ofstream glb_file(pathstring+".glb", ios::binary | ios::trunc);
         if (!glb_file.is_open())
         {
             cout << "failed to create glb file " << pathstring << "\n";
+            return;
         }
         
         vector<char> texture_buffer;
@@ -209,7 +212,6 @@ void glb_compressor(vector<model_info>&models)
                         primitive.erase("material");
                     }
                 }
-                
             }
             else
             {
@@ -250,7 +252,7 @@ void glb_compressor(vector<model_info>&models)
         tmp_gltf_file.seekp(0, ios::end);
         long long gltf_file_size = tmp_gltf_file.tellp();
         // creating buffer alignment
-        int8_t json_buffer_alignment = (ceil(gltf_file_size / 4.0f)*4)-gltf_file_size;
+        int8_t json_buffer_alignment = (ceil(gltf_file_size / 4.0)*4)-gltf_file_size;
         
         tmp_gltf_file.close();
         remove((pathstring+"_tmp.gltf").c_str());
@@ -285,7 +287,7 @@ void glb_compressor(vector<model_info>&models)
         
         // writes the bin buffer to the glb file
         bin_data_size = bin_data.size();
-        int8_t binary_buffer_alignment = (ceil(bin_data_size / 4.0f)*4)-bin_data_size;
+        int8_t binary_buffer_alignment = (ceil(bin_data_size / 4.0)*4)-bin_data_size;
 
         combined_size = binary_buffer_alignment+bin_data_size;
         glb_file.write(reinterpret_cast<const char*>(&combined_size), sizeof(uint32_t));
@@ -705,9 +707,10 @@ void hot_extractor_loop()
         ImGui::SetItemTooltip("extracts the collision 3D model for the level and 3D models");
         ImGui::Checkbox("convert world data to 3D model", &convert_world);
         ImGui::SetItemTooltip("this isn't flawless yet and might crash on extraction");
-        
+        #ifdef _DEBUG
         ImGui::RadioButton("Remastered", &is_remastered, 1);
         ImGui::RadioButton("Original", &is_remastered, 0);
+        #endif
         
         ImGui::TreePop();
     }
@@ -716,7 +719,6 @@ void hot_extractor_loop()
         valid_output_dir = filesystem::exists(global_output_path);
         combined_output_path = global_output_path;
         if (!combined_output_path.ends_with("\\"))combined_output_path+="\\";
-        std::cout << combined_output_path << std::endl;
     }
     
     if (!valid_output_dir)
