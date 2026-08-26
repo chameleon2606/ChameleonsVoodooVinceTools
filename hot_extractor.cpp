@@ -422,9 +422,7 @@ void extract_textures(string filepath, vector<string>*textures)
         output_file.write(data_buffer.data(), uncompressed_size-header_size);
 
         output_file.close();
-
-        // converts dds to png file
-        dds_to_png(combined_output_path, filename);
+        
         remove((combined_output_path+filename).c_str());
     }
 }
@@ -604,43 +602,12 @@ void extract_hot_file(string* filepath)
         }
         if (current_filename == "models")
         {
-            // extract model and fetch all of its texture names
+            // extract model
             output_file.close();
-            vector<string> tmp_texture_list = extract_model(file_to_extract);
-            texture_list.insert(texture_list.begin(), tmp_texture_list.begin(), tmp_texture_list.end());
+            //extract_model(file_to_extract);
             
-            last_dot = filename.find_last_of('.');
-            models[i].name = filename.substr(0, last_dot);
-            models[i].textures = tmp_texture_list;
-            
-            // delete the .gator after we have extracted it
-            if (delete_extracted_file) remove(file_to_extract.c_str());
-            
-            // erase duplicate texture names
-            sort(texture_list.begin(), texture_list.end());
-            auto last = unique(texture_list.begin(), texture_list.end());
-            texture_list.erase(last, texture_list.end());
-
-            // converts all texture names to lowercase for proper comparison
-            ranges::for_each(texture_list, [](string& texture_name)
-            {
-                ranges::transform(texture_name, texture_name.begin(), [](char c)
-                {
-                    return tolower(c);
-                });
-            });
-
-            if (i == file_count-1)
-            {
-                last_slash = filepath->find_last_of('\\');
-                if (!filepath->substr(0, last_slash).ends_with("common"))
-                {
-                    // extract all textures from the model
-                    string textures_path = filepath->substr(0, last_slash+1) + "textures.hot";
-                    extract_textures(textures_path,&texture_list);
-                }
-                if (model_compression){glb_compressor(models);}
-            }
+            thread taskThread(extract_model, file_to_extract);
+            taskThread.join();
         }
         
         if (filename == "index.tdf")
@@ -679,15 +646,11 @@ static void display_file_tree(const string& path)
                                 {
                                     string file_to_extract = hot_files.path().string();
                                     extract_hot_file(&file_to_extract);
-                                    
-                                    //thread taskThread(extract_hot_file());
-                                    //taskThread.join();
                                 }
                             }
                         }
                         ImGui::TreePop();
                     }
-                    
                 }
             }
             ImGui::TreePop();

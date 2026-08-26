@@ -7,9 +7,10 @@
 #include <deque>
 #include <thread>
 
-#include "hot_extractor.h"
 #include "main_window.h"
 #include "include/json.hpp"
+#include "tdf_parser.h"
+#include "FreeImage.h"
 
 #include "GLFW/glfw3.h"
 
@@ -17,7 +18,6 @@ using namespace std;
 size_t remember_position = 0;
 int32_t last_object = -1;
 string last_filename;
-string last_mtl;
 
 struct vertex_info
 {
@@ -60,9 +60,32 @@ struct fld_info
     int object_id;
 };
 
-void appendFloats(std::vector<char>& bytes, const std::vector<float>& floats) {
+void append_floats(std::vector<char>& bytes, const std::vector<float>& floats) {
     const char* p = reinterpret_cast<const char*>(floats.data());
     bytes.insert(bytes.end(), p, p + floats.size() * sizeof(float));
+}
+
+vector<char> dds_to_png_vector_w(const string& src_name)
+{
+    FIBITMAP* ddsImage = FreeImage_Load(FIF_DDS, (filesystem::current_path().string()+ R"(\source files\textures\)" +src_name).c_str(), DDS_DEFAULT);
+    if (!ddsImage)
+    {
+        cout << "invalid dds! " << src_name << "\n";
+        vector<char>empty_list;
+        return empty_list;
+    }
+    
+    FIBITMAP* converted = FreeImage_ConvertTo32Bits(ddsImage);
+    FreeImage_Unload(ddsImage);
+    FIMEMORY* memStream = FreeImage_OpenMemory();
+    FreeImage_SaveToMemory(FIF_PNG, converted, memStream, PNG_DEFAULT);
+    BYTE* data = nullptr;
+    DWORD sizeInBytes = 0;
+    FreeImage_AcquireMemory(memStream, &data, &sizeInBytes);
+    std::vector<char> pngBytes(reinterpret_cast<char*>(data), reinterpret_cast<char*>(data) + sizeInBytes);
+    FreeImage_CloseMemory(memStream);
+    
+    return pngBytes;
 }
 
 void extract_world()
@@ -78,9 +101,11 @@ void extract_world()
     
     gltf_data["materials"] = nlohmann::json::array();
     
-    ifstream index_file(combined_output_path+"\\index.json");
-    nlohmann::json jsonData = nlohmann::json::parse(index_file);
-    index_file.close();
+    string tdf_path = combined_output_path+"\\index.tdf";
+    nlohmann::json jsonData = SwampParser::parseFile(tdf_path);
+    ofstream json_file(combined_output_path+"j.json");
+    json_file << setw(4) << jsonData;
+    json_file.close();
     
     vector<string> texture_list;
     gltf_data["images"] = nlohmann::json::array();
@@ -93,81 +118,66 @@ void extract_world()
     
     for (size_t i = 0; auto& [id, mat] : jsonData["Materials"].items())
     {
-        material_idx[stoi(id)] = i;
         string base = mat.value("base", "");
         string lightmap = mat.value("lightmap", "");
+        material_idx[stoi(id)] = i;
+        nlohmann::json material_data;
         
-        size_t last_dot = base.find_last_of('.');
-        string texture_name = base.substr(0,last_dot);
-        
-        auto name = ranges::find(texture_list.begin(), texture_list.end(), texture_name);
-        if (name == texture_list.end())
+        if (!base.empty())
         {
-            nlohmann::json image;
-            image["mimeType"] = "image/png";
-            image["name"] = texture_name;
-            image["bufferView"] = buffer_view_count;
-            gltf_data["images"].push_back(image);
+            size_t last_dot = base.find_last_of('.');
+            string texture_name = base.substr(0,last_dot);
             
-            nlohmann::json texture;
-            texture["sampler"] = 0;
-            texture["source"] = texture_list.size();
-            gltf_data["textures"].push_back(texture);
-            
-            texture_list.push_back(texture_name);
-            
-            // opens the relevant texture and checks if it exists
-            ifstream texture_file(combined_output_path+"\\"+texture_name+".png", ios::binary);
-            if (!texture_file.is_open())
+            auto name = ranges::find(texture_list.begin(), texture_list.end(), texture_name);
+            if (name == texture_list.end())
             {
-                cout << "could not find texture file: " << texture_name << "!\n";
-                return;
-            }
-            // get size of png file
-            texture_file.seekg(0, ios::end);
-            long long texture_file_size = texture_file.tellg();
-            
-            nlohmann::json buffer_view;
-            buffer_view["buffer"] = 0;
-            buffer_view["byteLength"]= texture_file_size;
-            buffer_view["byteOffset"]= binary_data.size();
-            gltf_data["bufferViews"].push_back(buffer_view);
-            buffer_view_count++;
-            
-            // write all png binary data into a char vector after another
-            vector<char> current_texture_data(texture_file_size);
-            texture_file.clear();
-            texture_file.seekg(0, ios::beg);
-            texture_file.read(current_texture_data.data(), texture_file_size);
-            binary_data.insert(binary_data.end(), current_texture_data.begin(),current_texture_data.end());
-            // write offset remainder
-            int byte_remainder = (ceil(texture_file_size / 4.0)*4-texture_file_size);
-            if (byte_remainder > 0)
-            {
-                for (int j = 0; j < byte_remainder; j++)
+                nlohmann::json image;
+                image["mimeType"] = "image/png";
+                image["name"] = texture_name;
+                image["bufferView"] = buffer_view_count;
+                gltf_data["images"].push_back(image);
+                
+                nlohmann::json texture;
+                texture["sampler"] = 0;
+                texture["source"] = texture_list.size();
+                gltf_data["textures"].push_back(texture);
+                
+                texture_list.push_back(texture_name);
+                
+                vector<char> texture_binary_data = dds_to_png_vector_w(texture_name+".dds");
+                long long texture_file_size = texture_binary_data.size();
+                
+                nlohmann::json buffer_view;
+                buffer_view["buffer"] = 0;
+                buffer_view["byteLength"]= texture_file_size;
+                buffer_view["byteOffset"]= binary_data.size();
+                gltf_data["bufferViews"].push_back(buffer_view);
+                buffer_view_count++;
+                
+                binary_data.insert(binary_data.end(), texture_binary_data.begin(),texture_binary_data.end());
+                // write offset remainder
+                int byte_remainder = (ceil(texture_file_size / 4.0)*4-texture_file_size);
+                if (byte_remainder > 0)
                 {
-                    binary_data.push_back('\0');
+                    for (int j = 0; j < byte_remainder; j++)
+                    {
+                        binary_data.push_back('\0');
+                    }
                 }
             }
-            texture_file.close();
+            // looks for texture in list and notes the index
+            auto idx = ranges::find(texture_list, texture_name);
+            material_data["pbrMetallicRoughness"]["baseColorTexture"]["index"] = distance(texture_list.begin(), idx);
         }
         
-        nlohmann::json material_data;
         material_data["alphaMode"] = "MASK";
         material_data["doubleSided"] = false;
         material_data["name"] = id;
         material_data["pbrMetallicRoughness"]["metallicFactor"] = 0;
         material_data["pbrMetallicRoughness"]["roughnessFactor"] = 1;
         
-        // checks if the material has a texture name
-        if (!base.empty())
-        {
-            // looks for texture in list and notes the index
-            auto idx = ranges::find(texture_list, texture_name);
-            material_data["pbrMetallicRoughness"]["baseColorTexture"]["index"] = distance(texture_list.begin(), idx);
-        }
         gltf_data["materials"].push_back(material_data);
-        ++i;
+        i++;
     }
     
     gltf_data["scene"] = 0;
@@ -200,11 +210,9 @@ void extract_world()
         vector<string>material_list;
         
         nlohmann::json mesh_entry;
-        nlohmann::json primitive_entry;
         
         deque<uint32_t>offsets;
         bool repeats = false;
-        //while ((!repeats && pos < current_flud_header.string_indices_offset) || (repeats && !offsets.empty()))
         while (pos < current_flud_header.string_indices_offset)
         {
             if (repeats)
@@ -218,15 +226,30 @@ void extract_world()
             
             if (section_header.section_variant == 2)
             {
-                // get the clean name of the texture of that object
-                size_t last_dot = to_string(jsonData["Materials"][to_string(section_header.material_index)]["base"]).find_last_of('.');
-                string mtl = to_string(jsonData["Materials"][to_string(section_header.material_index)]["base"]).substr(1,last_dot-1);
-                
                 nlohmann::json node;
                 node["mesh"] = mesh_count;
-                node["name"] = mtl;
                 gltf_data["nodes"].push_back(node);
                 node_count++;
+                
+                nlohmann::json mesh;
+                nlohmann::json primitives;
+                
+                if (jsonData["Materials"][to_string(section_header.material_index)]["base"] != nullptr)
+                {
+                    // get the clean name of the texture of that object
+                    size_t last_dot = to_string(jsonData["Materials"][to_string(section_header.material_index)]["base"]).find_last_of('.');
+                    string mtl = to_string(jsonData["Materials"][to_string(section_header.material_index)]["base"]).substr(1,last_dot-1);
+                    
+                    node["name"] = mtl;
+                    mesh["name"] = mtl;
+                    primitives["material"] = material_idx[section_header.material_index];
+                }
+                else
+                {
+                    node["name"] = "object "+to_string(mesh_count);
+                    mesh["name"] = "object "+to_string(mesh_count);
+                }
+                
                 
                 /*
                 if (section_header.object_id > last_object)
@@ -234,11 +257,6 @@ void extract_world()
                     last_object = section_header.object_id;
                 }
                 */
-                
-                nlohmann::json mesh;
-                mesh["name"] = mtl;
-                nlohmann::json primitives;
-                primitives["material"] = material_idx[section_header.material_index];
                 
                 remember_position = fld_file.tellg();
                 
@@ -259,10 +277,6 @@ void extract_world()
                 if (last_filename != filename)
                 {
                     last_filename = filename;
-                }
-                if (last_mtl != mtl)
-                {
-                    last_mtl = mtl;
                 }
 
                 // seek back
@@ -326,7 +340,7 @@ void extract_world()
                 gltf_data["bufferViews"].push_back(vertex_pos_buffer_views);
                 buffer_view_count++;
                 // write vertex pos data to binary data list
-                appendFloats(binary_data, pos_list);
+                append_floats(binary_data, pos_list);
                 //binary_data.insert(binary_data.end(), pos_list.begin(), pos_list.end());
                 /*
                 for (auto& p : vpos)
@@ -354,7 +368,7 @@ void extract_world()
                 gltf_data["bufferViews"].push_back(norms_buffer_views);
                 buffer_view_count++;
                 
-                appendFloats(binary_data, norms_list);
+                append_floats(binary_data, norms_list);
                 /*
                 for (auto& norm : norms)
                 {
@@ -384,7 +398,7 @@ void extract_world()
                 gltf_data["bufferViews"].push_back(uv_buffer_views);
                 buffer_view_count++;
                 
-                appendFloats(binary_data, uvs_list);
+                append_floats(binary_data, uvs_list);
                 /*
                 for (auto& uv : uvs)
                 {
@@ -414,7 +428,7 @@ void extract_world()
                 gltf_data["bufferViews"].push_back(lightmap_uv_buffer_views);
                 buffer_view_count++;
                 
-                appendFloats(binary_data, lm_uvs_list);
+                append_floats(binary_data, lm_uvs_list);
                 /*
                 for (auto& uv : lm_uvs)
                 {
@@ -499,8 +513,29 @@ void extract_world()
                 int remainder = (ceil(buffer_data / 16) * 16) - buffer_data;
                 if (remainder > 0)fld_file.seekg(remainder, ios::cur);
             }
+            else if (section_header.section_variant == 3)
+            {
+                /*
+                if (section_header.material_index > 0)
+                {
+                    fld_file.seekg(16, ios::cur);
+                }*/
+            }
+            else
+            {
+                cout << "section error at: " << fld_file.tellg() << endl;
+                return;
+            }
             
             pos = fld_file.tellg();
+            if (pos == 801056)
+            {
+                cout << pos;
+            }
+            if (remember_position-160 == current_flud_header.last_header)
+            {
+                cout << "same offset";
+            }
             /*
             if (!repeats && pos >= current_flud_header.string_indices_offset)
             {
@@ -527,7 +562,6 @@ void extract_world()
         meshes_in_zone = 0;
         current_zone_count+=2;
         
-        
         fld_file.close();
     }
     vertices_file.close();
@@ -551,7 +585,11 @@ void extract_world()
     
     // write JSON section
     glb_file.seekp(20, ios::beg);
+#ifdef _DEBUG
     glb_file << setw(4) << gltf_data;
+#else
+    glb_file << gltf_data;
+#endif
     // get size of JSON section
     streamoff json_size = glb_file.tellp();
     json_size -= 20;

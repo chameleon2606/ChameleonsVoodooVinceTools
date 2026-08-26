@@ -11,6 +11,7 @@
 #include "main_window.h"
 #include "include/json.hpp"
 #include "hot_extractor.h"
+#include "FreeImage.h"
 
 using namespace std;
 
@@ -131,13 +132,56 @@ array<array<float,4>,4> mat4_multiply(const array<array<float,4>,4>& a, const ar
     return result;
 }
 
+vector<char> dds_to_png_vector(string& src_path, string& src_name)
+{
+    FIBITMAP* ddsImage = FreeImage_Load(FIF_DDS, (src_path+src_name).c_str(), DDS_DEFAULT);
+    if (!ddsImage)
+    {
+        cout << "invalid dds! " << src_name << "\n";
+        vector<char>empty_list;
+        return empty_list;
+    }
+    
+    FIBITMAP* converted = FreeImage_ConvertTo32Bits(ddsImage);
+    FreeImage_Unload(ddsImage);
+    FIMEMORY* memStream = FreeImage_OpenMemory();
+    FreeImage_SaveToMemory(FIF_PNG, converted, memStream, PNG_DEFAULT);
+    BYTE* data = nullptr;
+    DWORD sizeInBytes = 0;
+    FreeImage_AcquireMemory(memStream, &data, &sizeInBytes);
+    std::vector<char> pngBytes(reinterpret_cast<char*>(data), reinterpret_cast<char*>(data) + sizeInBytes);
+    FreeImage_CloseMemory(memStream);
+    
+    return pngBytes;
+}
+
+void dds_to_png_file(vector<string>& name)
+{
+    FreeImage_Initialise();
+    for (const auto& i : name)
+    {
+        FIBITMAP* ddsImage = FreeImage_Load(FIF_DDS,(filesystem::current_path().string() + R"(\source files\textures\)" + i).c_str(), DDS_DEFAULT);
+        if (!ddsImage)
+        {
+            cout << "invalid dds! " << i << "\n";
+            return;
+        }
+        size_t last_dot = i.find_last_of('.');
+        if (!FreeImage_Save(FIF_PNG, ddsImage, (combined_output_path+ i.substr(0, last_dot)+".png").c_str(), 0))
+        {
+            cout << "failed to save png image " << i << "\n";
+        }
+        FreeImage_Unload(ddsImage);
+    }
+    FreeImage_DeInitialise();
+}
 
 void init_model_extractor()
 {
     
 }
 
-vector<string> extract_model(string current_filepath)
+void extract_model(std::string current_filepath)
 {
     uint16_t accessor_count = 0;
     uint16_t buffer_view_count = 0;
@@ -156,8 +200,8 @@ vector<string> extract_model(string current_filepath)
 
     // creates a new .gltf & .bin file with the name of the gator file
     ifstream src_file(current_filepath, ios::binary); // input .gator file
-    ofstream gltf_file(combined_output_path+"\\"+current_filename + ".gltf", ios::trunc);
-    ofstream bin_file(combined_output_path+"\\"+current_filename + ".bin", ios::binary | ios::trunc);
+    
+    vector<char> binary_data;
 
     nlohmann::json gltf_data;
     gltf_data["nodes"] = nlohmann::json::array();
@@ -198,7 +242,6 @@ vector<string> extract_model(string current_filepath)
         }
         string_list.push_back(texturename);
     }
-    
 
     gltf_data["scene"] = 0;
     nlohmann::json scene;
@@ -219,8 +262,6 @@ vector<string> extract_model(string current_filepath)
         scene["nodes"] = {0};
     }
     gltf_data["scenes"].push_back(scene);
-
-    uint32_t current_bin_size = 0;
     
     // collects bone data
     if (include_bones)
@@ -325,17 +366,15 @@ vector<string> extract_model(string current_filepath)
         gltf_data["accessors"].push_back(rig_accessor);
         accessor_count++;
     
-        current_bin_size = bin_file.tellp();
-        bin_file.write(reinterpret_cast<const char*>(inverse_bind_matrix_list.data()),inverse_bind_matrix_list.size() * sizeof(float));
-    
         nlohmann::json rig_buffer_views;
         rig_buffer_views["byteLength"] = bones.size()*16*sizeof(float);
         rig_buffer_views["buffer"] = 0;
-        rig_buffer_views["byteOffset"] = current_bin_size;
+        rig_buffer_views["byteOffset"] = binary_data.size();
+        binary_data.insert(binary_data.end(), reinterpret_cast<const char*>(inverse_bind_matrix_list.data()), reinterpret_cast<const char*>(inverse_bind_matrix_list.data() + inverse_bind_matrix_list.size()));
+        
         gltf_data["bufferViews"].push_back(rig_buffer_views);
         buffer_view_count++;
-    
-        
+
         vector<int16_t> bone_joints_list;
         for (uint32_t i = 0; i < bones.size(); i++)
         {
@@ -513,66 +552,57 @@ vector<string> extract_model(string current_filepath)
         pos = src_file.tellg();
     }
 
-    if (include_bones)
+    if (include_bones && current_gator_header.bone_count > 1)
     {
+        // JOINTS
+        nlohmann::json joints_accessor;
+        joints_accessor["bufferView"] = buffer_view_count;
+        joints_accessor["componentType"] = 5121;
+        joints_accessor["count"] = current_gator_header.vert_count;
+        joints_accessor["type"] = "VEC4";
+        gltf_data["accessors"].push_back(joints_accessor);
+        bone_indices_index = accessor_count;
+        accessor_count++;
+
+        nlohmann::json joints_buffer_views;
+        joints_buffer_views["byteLength"] = current_gator_header.vert_count * 4;
+        joints_buffer_views["buffer"] = 0;
+        joints_buffer_views["target"] = 34962;
+        joints_buffer_views["byteOffset"] = binary_data.size();
+        binary_data.insert(binary_data.end(), reinterpret_cast<const char*>(joints.data()), reinterpret_cast<const char*>(joints.data() + joints.size()));
         
-        if (current_gator_header.bone_count > 1)
-        {
-            current_bin_size = bin_file.tellp();
-            
-            // JOINTS
-            nlohmann::json joints_accessor;
-            joints_accessor["bufferView"] = buffer_view_count;
-            joints_accessor["componentType"] = 5121;
-            joints_accessor["count"] = current_gator_header.vert_count;
-            joints_accessor["type"] = "VEC4";
-            gltf_data["accessors"].push_back(joints_accessor);
-            bone_indices_index = accessor_count;
-            accessor_count++;
+        gltf_data["bufferViews"].push_back(joints_buffer_views);
+        buffer_view_count++;
 
-            nlohmann::json joints_buffer_views;
-            joints_buffer_views["byteLength"] = current_gator_header.vert_count * 4;
-            joints_buffer_views["buffer"] = 0;
-            joints_buffer_views["byteOffset"] = current_bin_size;
-            joints_buffer_views["target"] = 34962;
-            gltf_data["bufferViews"].push_back(joints_buffer_views);
-            bin_file.write(reinterpret_cast<const char*>(joints.data()),joints.size());
-            buffer_view_count++;
+        // WEIGHTS
+        nlohmann::json weights_accessor;
+        weights_accessor["bufferView"] = buffer_view_count;
+        weights_accessor["componentType"] = 5121;
+        weights_accessor["count"] = current_gator_header.vert_count;
+        weights_accessor["type"] = "VEC4";
+        weights_accessor["normalized"] = true;
+        gltf_data["accessors"].push_back(weights_accessor);
+        weights_index = accessor_count;
+        accessor_count++;
 
-            // WEIGHTS
-            nlohmann::json weights_accessor;
-            weights_accessor["bufferView"] = buffer_view_count;
-            weights_accessor["componentType"] = 5121;
-            weights_accessor["count"] = current_gator_header.vert_count;
-            weights_accessor["type"] = "VEC4";
-            weights_accessor["normalized"] = true;
-            gltf_data["accessors"].push_back(weights_accessor);
-            weights_index = accessor_count;
-            accessor_count++;
-
-            current_bin_size = bin_file.tellp();
-
-            nlohmann::json weights_buffer_views;
-            weights_buffer_views["byteLength"] = current_gator_header.vert_count * 4;
-            weights_buffer_views["buffer"] = 0;
-            weights_buffer_views["byteOffset"] = current_bin_size;
-            weights_buffer_views["target"] = 34962;
-            gltf_data["bufferViews"].push_back(weights_buffer_views);
-            bin_file.write(reinterpret_cast<const char*>(weights.data()),weights.size());
-            buffer_view_count++;
-        }
+        nlohmann::json weights_buffer_views;
+        weights_buffer_views["byteLength"] = current_gator_header.vert_count * 4;
+        weights_buffer_views["buffer"] = 0;
+        weights_buffer_views["target"] = 34962;
+        weights_buffer_views["byteOffset"] = binary_data.size();
+        binary_data.insert(binary_data.end(), reinterpret_cast<const char*>(weights.data()), reinterpret_cast<const char*>(weights.data() + weights.size()));
+        
+        gltf_data["bufferViews"].push_back(weights_buffer_views);
+        buffer_view_count++;
     }
 
     // POSITIONS
-    current_bin_size = bin_file.tellp();
     nlohmann::json vertex_pos_accessor;
     vertex_pos_accessor["bufferView"] = buffer_view_count;
     vertex_pos_accessor["componentType"] = 5126;
     vertex_pos_accessor["count"] = current_gator_header.vert_count;
-    
     vertex_pos_accessor["max"] = {current_gator_header.max_x,current_gator_header.max_y,current_gator_header.max_z};
     vertex_pos_accessor["min"] = {current_gator_header.min_x,current_gator_header.min_y,current_gator_header.min_z};
-    
     vertex_pos_accessor["type"] = "VEC3";
     gltf_data["accessors"].push_back(vertex_pos_accessor);
     vertex_position_index = accessor_count;
@@ -581,14 +611,15 @@ vector<string> extract_model(string current_filepath)
     nlohmann::json vertex_pos_buffer_views;
     vertex_pos_buffer_views["byteLength"] = 3*current_gator_header.vert_count*sizeof(float);
     vertex_pos_buffer_views["buffer"] = 0;
-    vertex_pos_buffer_views["byteOffset"] = current_bin_size;
     vertex_pos_buffer_views["target"] = 34962;
-    gltf_data["bufferViews"].push_back(vertex_pos_buffer_views);
-    bin_file.write(reinterpret_cast<const char*>(vertex_positions.data()),vertex_positions.size() * sizeof(float));
-    buffer_view_count++;
+    vertex_pos_buffer_views["byteOffset"] = binary_data.size();
+    binary_data.insert(binary_data.end(), reinterpret_cast<const char*>(vertex_positions.data()), reinterpret_cast<const char*>(vertex_positions.data() + vertex_positions.size()));
+
     
+    gltf_data["bufferViews"].push_back(vertex_pos_buffer_views);
+    buffer_view_count++;
+
     // NORMALS
-    current_bin_size = bin_file.tellp();
     nlohmann::json norms_accessor;
     norms_accessor["bufferView"] = buffer_view_count;
     norms_accessor["componentType"] = 5126;
@@ -601,16 +632,16 @@ vector<string> extract_model(string current_filepath)
     nlohmann::json norms_buffer_views;
     norms_buffer_views["byteLength"] = 3*current_gator_header.vert_count*sizeof(float);
     norms_buffer_views["buffer"] = 0;
-    norms_buffer_views["byteOffset"] = current_bin_size;
     norms_buffer_views["target"] = 34962;
+    norms_buffer_views["byteOffset"] = binary_data.size();
+    binary_data.insert(binary_data.end(), reinterpret_cast<const char*>(normals.data()), reinterpret_cast<const char*>(normals.data() + normals.size()));
+    
     gltf_data["bufferViews"].push_back(norms_buffer_views);
-    bin_file.write(reinterpret_cast<const char*>(normals.data()),normals.size() * sizeof(float));
     buffer_view_count++;
 
     if (!texture_list.empty())
     {
         // TEXCOORDS / UVs
-        current_bin_size = bin_file.tellp();
         nlohmann::json uv_accessor;
         uv_accessor["bufferView"] = buffer_view_count;
         uv_accessor["componentType"] = 5126;
@@ -623,10 +654,11 @@ vector<string> extract_model(string current_filepath)
         nlohmann::json uv_buffer_views;
         uv_buffer_views["byteLength"] = 2*current_gator_header.vert_count*sizeof(float);
         uv_buffer_views["buffer"] = 0;
-        uv_buffer_views["byteOffset"] = current_bin_size;
         uv_buffer_views["target"] = 34962;
+        uv_buffer_views["byteOffset"] = binary_data.size();
+        binary_data.insert(binary_data.end(), reinterpret_cast<const char*>(texcoords.data()), reinterpret_cast<const char*>(texcoords.data() + texcoords.size()));
+        
         gltf_data["bufferViews"].push_back(uv_buffer_views);
-        bin_file.write(reinterpret_cast<const char*>(texcoords.data()),texcoords.size() * sizeof(float));
         buffer_view_count++;
     }
     
@@ -715,6 +747,7 @@ vector<string> extract_model(string current_filepath)
         primitives["indices"] = indices_index+i;
         primitives["material"] = current_tstrip.material_index;
         
+        // TEXCOORDS
         nlohmann::json index_accessor;
         index_accessor["bufferView"] = buffer_view_count;
         index_accessor["componentType"] = 5123;
@@ -722,30 +755,19 @@ vector<string> extract_model(string current_filepath)
         index_accessor["type"] = "SCALAR";
         gltf_data["accessors"].push_back(index_accessor);
         accessor_count++;
-
-        long long current_bin_size = bin_file.tellp();
-        bin_file.write(reinterpret_cast<const char*>(vertex_indices.data()),vertex_indices.size() * sizeof(uint16_t));
-    
+        
         nlohmann::json indices_buffer_views;
         indices_buffer_views["byteLength"] = vertex_indices.size() * sizeof(uint16_t);
         indices_buffer_views["buffer"] = 0;
-        indices_buffer_views["byteOffset"] = current_bin_size;
         indices_buffer_views["target"] = 34963;
+        indices_buffer_views["byteOffset"] = binary_data.size();
         gltf_data["bufferViews"].push_back(indices_buffer_views);
-        meshes["primitives"].push_back(primitives);
         buffer_view_count++;
-        
+        meshes["primitives"].push_back(primitives);
+        binary_data.insert(binary_data.end(), reinterpret_cast<const char*>(vertex_indices.data()), reinterpret_cast<const char*>(vertex_indices.data() + vertex_indices.size()));
+
         last_verts_amount += current_tstrip.verts_in_strip;
     }
-    
-    current_bin_size = bin_file.tellp();
-    bin_file.seekp(0, ios::end);
-    current_bin_size = bin_file.tellp();
-    
-    nlohmann::json buffer;
-    buffer["byteLength"] = current_bin_size;
-    buffer["uri"] = current_filename + ".bin";
-    gltf_data["buffers"].push_back(buffer);
     
     if (!texture_list.empty())
     {
@@ -753,22 +775,65 @@ vector<string> extract_model(string current_filepath)
         sampler["magFilter"] = 9729;
         sampler["minFilter"] = 9987;
         gltf_data["samplers"].push_back(sampler);
+        if (!model_compression)
+        {
+            dds_to_png_file(texture_list);
+        }
         for (size_t i = 0; i < texture_list.size(); i++)
         {
             last_dot = texture_list[i].find_last_of('.');
             
             nlohmann::json texture;
-            texture["sampler"]=0;
+            texture["sampler"]= 0;
             texture["source"]= i;
             gltf_data["textures"].push_back(texture);
-            
             nlohmann::json image;
             image["mimeType"] = "image/png";
             image["name"] = texture_list[i].substr(0, last_dot);
-            image["uri"] = texture_list[i].substr(0, last_dot)+".png";
+            
+            if (model_compression)
+            {
+                std::string textures_path = filesystem::current_path().string()+"\\source files\\textures\\";
+                vector<char>texture_data = dds_to_png_vector(textures_path,texture_list[i]);
+                
+                image["bufferView"] = buffer_view_count;
+                
+                nlohmann::json texture_buffer_views;
+                texture_buffer_views["byteLength"] = texture_data.size();
+                texture_buffer_views["buffer"] = 0;
+                texture_buffer_views["byteOffset"] = binary_data.size();
+                gltf_data["bufferViews"].push_back(texture_buffer_views);
+                buffer_view_count++;
+                
+                binary_data.insert(binary_data.end(), texture_data.begin(), texture_data.end());
+            }
+            else
+            {
+                image["uri"] = texture_list[i].substr(0, last_dot)+".png";
+            }
+            
             gltf_data["images"].push_back(image);
         }
     }
+    
+    // binary section
+    uint32_t binary_size = binary_data.size();
+    int binary_data_alignment = static_cast<int>(ceil(binary_size / 4.0)*4)-binary_size;
+    vector<char>alignment_buffer(binary_data_alignment);
+    binary_data.insert(binary_data.end(), alignment_buffer.begin(), alignment_buffer.end());
+    binary_size = binary_data.size();
+    
+    // buffer
+    nlohmann::json buffer;
+    buffer["byteLength"] = binary_size;
+    if (!model_compression)
+    {
+        buffer["uri"] = current_filename + ".bin";
+        ofstream bin_file(combined_output_path+"\\"+current_filename + ".bin", ios::binary | ios::trunc);
+        bin_file.write(binary_data.data(), binary_size);
+        bin_file.close();
+    }
+    gltf_data["buffers"].push_back(buffer);
     
     // loops through each material
     for (uint32_t i = 0; i < current_gator_header.material_count; i++)
@@ -787,6 +852,7 @@ vector<string> extract_model(string current_filepath)
         // looks for texture in texture list and applies it's index to the material
         if (current_material.texture_name_index >= 0)
         {
+            FreeImage_Initialise();
             for (size_t j = 0; j < texture_list.size(); j++)
             {
                 if (string_list[current_material.texture_name_index] == texture_list[j])
@@ -795,6 +861,7 @@ vector<string> extract_model(string current_filepath)
                     break;
                 }
             }
+            FreeImage_DeInitialise();
         }
         if (current_material.normal_map_index >= 0)
         {
@@ -832,19 +899,70 @@ vector<string> extract_model(string current_filepath)
         bsp_converter(bsp_path, bsp_name);
     }
     
-    
-    #ifdef _DEBUG
-    gltf_file << setw(4) << gltf_data;
-    
-    #else
-    gltf_file << gltf_data;
-    
-    #endif
-
     src_file.close();
+    if (delete_extracted_file)remove(current_filepath.c_str());
+    
+    string filename;
+    if (model_compression)
+    {
+        filename = combined_output_path+"\\"+current_filename + ".glb";
+    }
+    else
+    {
+        filename = combined_output_path+"\\"+current_filename + ".gltf";
+    }
+    ofstream gltf_file(filename, ios::binary, ios::trunc);
+
+#ifdef _DEBUG
+    gltf_file << setw(4) << gltf_data;
+#else
+    gltf_file << gltf_data;
+#endif
+    
+    if (model_compression)
+    {
+        gltf_file.seekp(0, ios::end);
+        uint32_t json_size = gltf_file.tellp();
+        
+        uint32_t json_data_alignment = static_cast<int>(ceil(json_size / 4.0)*4)-json_size;
+        json_size += json_data_alignment;
+        
+        gltf_file.seekp(0, ios::beg);
+        //glb header
+        gltf_file.write(reinterpret_cast<const char*>(&"glTF"), sizeof(char)*4);
+        int version = 2;
+        gltf_file.write(reinterpret_cast<const char*>(&version), sizeof(uint32_t));
+        // total file size placeholder
+        gltf_file.write(reinterpret_cast<const char*>(&json_size), sizeof(uint32_t));
+        
+        //JSON section
+        gltf_file.write(reinterpret_cast<const char*>(&json_size), sizeof(uint32_t));
+        gltf_file.write(reinterpret_cast<const char*>(&"JSON"), sizeof(char)*4);
+
+        #ifdef _DEBUG
+        gltf_file << setw(4) << gltf_data;
+        #else
+        gltf_file << gltf_data;
+        #endif
+        
+        if (json_data_alignment > 0)
+        {
+            gltf_file.write(reinterpret_cast<const char*>(&"   "), json_data_alignment*sizeof(char));
+        }
+        
+        gltf_file.seekp(0, ios::end);
+        gltf_file.write(reinterpret_cast<const char*>(&binary_size), sizeof(uint32_t));
+        gltf_file.write(reinterpret_cast<const char*>(&"BIN"), sizeof(char)*4);
+        gltf_file.write(binary_data.data(), binary_size);
+        
+        gltf_file.seekp(0, ios::end);
+        uint32_t total_filesize = gltf_file.tellp();
+        
+        gltf_file.seekp(8, ios::beg);
+        gltf_file.write(reinterpret_cast<const char*>(&total_filesize), sizeof(uint32_t));
+    }
+    
     gltf_file.close();
-    bin_file.close();
-    return texture_list;
 }
 
 
