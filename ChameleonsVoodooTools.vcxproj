@@ -169,6 +169,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="animation_applier.cpp" />
     <ClCompile Include="hot_extractor.cpp" />
     <ClCompile Include="include\ImGui\imgui.cpp" />
     <ClCompile Include="include\ImGui\imgui_demo.cpp" />
@@ -181,6 +182,7 @@
     <ClCompile Include="model_extractor.cpp" />
     <ClCompile Include="openGL.cpp" />
     <ClCompile Include="repacking.cpp" />
+    <ClCompile Include="tdf_parser.cpp" />
     <ClCompile Include="world_extractor.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -229,6 +231,7 @@
     <Content Include="x64\Debug\OpenGL.pdb" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="animation_applier.h" />
     <ClInclude Include="hot_extractor.h" />
     <ClInclude Include="include\FreeImage\FreeImage.h" />
     <ClInclude Include="include\ImGui\imconfig.h" />
@@ -258,10 +261,8 @@
     <ClInclude Include="openGL.h" />
     <ClInclude Include="repacking.h" />
     <ClInclude Include="tdf_json_parser.h" />
+    <ClInclude Include="tdf_parser.h" />
     <ClInclude Include="world_extractor.h" />
-  </ItemGroup>
-  <ItemGroup>
-    <Folder Include="output\" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

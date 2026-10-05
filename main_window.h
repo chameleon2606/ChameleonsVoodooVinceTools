@@ -17,6 +17,7 @@ inline bool delete_extracted_file = true;
 inline bool convert_level_bsp = false;
 inline bool model_compression = true;
 inline bool include_bones = true;
+inline bool include_animations = true;
 inline bool convert_world = true;
 inline int is_remastered = true;
 void init_main();

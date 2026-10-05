@@ -2,6 +2,7 @@
 #include "repacking.h"
 #include "main_window.h"
 #include "hot_extractor.h"
+#include "animation_applier.h"
 #include <filesystem>
 
 void init_main()
@@ -35,6 +36,11 @@ void main_loop()
         if (ImGui::BeginTabItem("Repacker"))
         {
             repack_loop();
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Animation Applier"))
+        {
+            animation_loop();
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();

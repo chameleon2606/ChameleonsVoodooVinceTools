@@ -26,6 +26,7 @@ struct vertex_info
     float values_0[7];
     float x_uv1, y_uv1, x_uv2, y_uv2, lightmap_uv_x, lightmap_uv_y;
 };
+
 struct fld_header
 {
     char id[4];
@@ -37,6 +38,7 @@ struct fld_header
     uint32_t some_offset1;
     uint32_t string_indices_offset;
 };
+
 struct fld_info
 {
     int values0[5];

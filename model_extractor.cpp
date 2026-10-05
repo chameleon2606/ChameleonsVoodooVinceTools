@@ -1,4 +1,5 @@
-﻿#include <iostream>
+﻿#include <algorithm>
+#include <iostream>
 #include <fstream>
 #include <array>
 #include <imgui.h>
@@ -12,6 +13,8 @@
 #include "include/json.hpp"
 #include "hot_extractor.h"
 #include "FreeImage.h"
+#include "decompose_trs.h"
+#include "vince_anim_import.hpp"
 
 using namespace std;
 
@@ -79,20 +82,82 @@ struct bsp_header
     char signature[4];
     uint32_t version;
     uint32_t file_size;
-    
 };
-
-bool folder_validation(char folder[])
+struct anim_header
 {
-    if (filesystem::exists(folder))
-    {
-        return true;
-    }
-    else
-    {
-        return false;
-    }
-}
+    char signature[4];
+    uint32_t version;
+    float animation_in_seconds;
+    uint32_t bones_count;
+    uint32_t sound_event_tracks;
+    uint32_t strings_offset;
+    uint32_t unknown_value;
+    uint32_t start_of_bones;
+    uint32_t event_tracks_pointer_table;
+    uint32_t sound_name_index_table;
+    uint32_t sounds_offset;
+};
+struct bone_anim_entry
+{
+    uint32_t unknown_count;
+    float unknown_value;
+        
+    uint32_t x_pos_keyframes;
+    float x_pos_default;
+    uint32_t y_pos_keyframes;
+    float y_pos_default;
+    uint32_t z_pos_keyframes;
+    float z_pos_default;
+        
+    uint32_t x_rot_keyframes;
+    float x_rot_default;
+    uint32_t y_rot_keyframes;
+    float y_rot_default;
+    uint32_t z_rot_keyframes;
+    float z_rot_default;
+        
+    uint32_t x_scale_keyframes;
+    float x_scale_default;
+    uint32_t y_scale_keyframes;
+    float y_scale_default;
+    uint32_t z_scale_keyframes;
+    float z_scale_default;
+    
+    uint32_t unknown_offset;
+    uint32_t x_pos_o, y_pos_o, z_pos_o;
+    uint32_t x_rot_o, y_rot_o, z_rot_o;
+    uint32_t x_scale_o, y_scale_o, z_scale_o;
+   
+    //char padding[8];
+};
+struct KeyframeRecord
+{
+    float coeff_cubic;
+    float coeff_quad;
+    float coeff_linear;
+    float value;
+};
+struct SpinKeys
+{
+    float coefficient_cubic, coefficient_quad;
+    float total_rotation_radians;
+};
+struct general_keyframe
+{
+    float time = 0;
+    float x_coeff_cubic = 0, x_coeff_quad = 0, x_end_value = 0, x_coeff_linear = 0;
+    float y_coeff_cubic = 0, y_coeff_quad = 0, y_end_value = 0, y_coeff_linear = 0;
+    float z_coeff_cubic = 0, z_coeff_quad = 0, z_end_value = 0, z_coeff_linear = 0;
+    bool x_valid = false, y_valid = false, z_valid = false;
+};
+struct keyframe_values
+{
+    float time = 0;
+    float coeff_cubic = 0;
+    float coeff_quad = 0;
+    float coeff_linear = 0;
+    float end_value = 0;
+};
 
 //converts 4x4 float to array
 array<array<float,4>,4> to_array(float m[4][4])
@@ -298,7 +363,6 @@ void extract_model(std::string current_filepath)
             mirrored_bind[k]     = mirror_x(to_array(bones[k].bind_matrix));
             mirrored_inv_bind[k] = mirror_x(to_array(bones[k].inverse_bind_matrix));
         }
-
         
         // loops though bones again to collect all bone data
         vector<float>inverse_bind_matrix_list;
@@ -330,10 +394,13 @@ void extract_model(std::string current_filepath)
         
             nlohmann::json bone;
             bone["name"] = string_list[bones[i].index];
-            if (pose_positions != default_matrix)
-            {
-                bone["matrix"] = pose_positions;
-            }
+            vector<float> bind_data = DecomposeMatrix(pose_positions);
+            
+            vector<float> pos(bind_data.begin(), bind_data.begin()+3), rot(bind_data.begin()+3, bind_data.begin()+7), sz(bind_data.begin()+7, bind_data.end());
+            bone["translation"] = pos;
+            bone["rotation"] = rot;
+            bone["scale"] = sz;
+            
             vector<int16_t> bone_children_list;
             if (i == 0)
             {
@@ -821,6 +888,8 @@ void extract_model(std::string current_filepath)
     int binary_data_alignment = static_cast<int>(ceil(binary_size / 4.0)*4)-binary_size;
     vector<char>alignment_buffer(binary_data_alignment);
     binary_data.insert(binary_data.end(), alignment_buffer.begin(), alignment_buffer.end());
+    
+    // at this point all buffer data has been written, and we can determine the size of it
     binary_size = binary_data.size();
     
     // buffer
@@ -972,7 +1041,7 @@ void m_extractor_loop()
     if (ImGui::InputText("output path", global_output_path, IM_ARRAYSIZE(global_output_path)))
     {
         // each interaction with the textbox, it checks if the provided text is a valid path
-        valid_folders = folder_validation(global_output_path);
+        valid_folders = filesystem::exists(global_output_path);
         combined_output_path = global_output_path;
         if (!combined_output_path.ends_with("\\"))combined_output_path+="\\";
     }

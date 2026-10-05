@@ -665,7 +665,7 @@ void hot_extractor_loop()
         ImGui::Checkbox("delete extracted and converted files", &delete_extracted_file);
         ImGui::Checkbox("Pack models and textures into .glb files", &model_compression);
         ImGui::SetItemTooltip("this creates a single file for the 3D model");
-        ImGui::Checkbox("Include Bones / Rigging data", &include_bones);
+        //ImGui::Checkbox("Include Bones / Rigging data", &include_bones);
         ImGui::Checkbox("extract colliders", &convert_level_bsp);
         ImGui::SetItemTooltip("extracts the collision 3D model for the level and 3D models");
         ImGui::Checkbox("convert world data to 3D model", &convert_world);
