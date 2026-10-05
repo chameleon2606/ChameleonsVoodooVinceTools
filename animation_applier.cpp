@@ -1135,7 +1135,7 @@ static void display_animation_files(const std::string& path)
     const float half_width = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
     // negative height = fill the remaining space except this much, which keeps the button row visible
     const float list_height = -ImGui::GetFrameHeightWithSpacing();
-
+    int animation_amount = 0;
     ImGui::BeginChild("Animation Files", ImVec2(half_width, list_height), ImGuiChildFlags_Borders);
     for (auto& entry : std::filesystem::directory_iterator(path))
     {
@@ -1143,6 +1143,7 @@ static void display_animation_files(const std::string& path)
         {
             std::string anim_file = entry.path().string();
             bool check = selected_anim_files.contains(anim_file);
+            animation_amount++;
             if (ImGui::Checkbox(entry.path().filename().string().c_str(), &check))
             {
                 if (check)
@@ -1152,9 +1153,13 @@ static void display_animation_files(const std::string& path)
             }
         }
     }
+    if (animation_amount <= 1)
+    {
+        ImGui::Text("no animation data found yet!\nGo to the resource extractor\nand extract some animations");
+    }
     ImGui::EndChild();
-
     ImGui::SameLine();
+    
     ImGui::BeginChild("3D Models", ImVec2(half_width, list_height), ImGuiChildFlags_Borders);
     for (auto& entry : std::filesystem::directory_iterator(path))
     {

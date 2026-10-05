@@ -33,14 +33,14 @@ void main_loop()
             hot_extractor_loop();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Repacker"))
-        {
-            repack_loop();
-            ImGui::EndTabItem();
-        }
         if (ImGui::BeginTabItem("Animation Applier"))
         {
             animation_loop();
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Repacker"))
+        {
+            repack_loop();
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();
