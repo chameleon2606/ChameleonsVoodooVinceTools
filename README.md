@@ -13,6 +13,10 @@
 * all rigging data is included for every model, but they can be disabled (for slightly smaller file sizes) as well
 * some models have more complex collision data. These get exported as simple .obj models
 
+#### Animation applier:
+* unpack models and animations first, then go to the animation applier tab, select some animations and the 3D model to apply it to
+* choose what framerate the animations should be baked to 
+  
 #### Level extraction:
 * extracting the world.hot file will use the containing files and build a .obj file of that level, including textures
 * these will only contain all static elements of the level
@@ -27,3 +31,4 @@
 just choose the format **8.8.8.8 BGRA 32 bpp**
 
 <img width="802" height="632" alt="Repacker" src="https://github.com/user-attachments/assets/9ea2837d-d1c9-4d90-a5a1-491576790f3c" />
+
