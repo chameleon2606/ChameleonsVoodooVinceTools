@@ -4,6 +4,7 @@
 //#include "vince_anim_import.hpp"
 #include "imgui.h"
 #include "main_window.h"
+#include "model_preview.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -1232,6 +1233,12 @@ static void display_animation_files(const std::string& path)
             if (ImGui::RadioButton(entry.path().filename().string().c_str(), selected_model_file == model_file))
             {
                 selected_model_file = model_file;
+            }
+            // hover a model to see it
+            if (ImGui::BeginItemTooltip())
+            {
+                draw_model_preview(model_file);
+                ImGui::EndTooltip();
             }
         }
     }

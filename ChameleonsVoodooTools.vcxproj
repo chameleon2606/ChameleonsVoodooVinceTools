@@ -180,6 +180,7 @@
     <ClCompile Include="include\ImGui\imgui_widgets.cpp" />
     <ClCompile Include="main_window.cpp" />
     <ClCompile Include="model_extractor.cpp" />
+    <ClCompile Include="model_preview.cpp" />
     <ClCompile Include="openGL.cpp" />
     <ClCompile Include="repacking.cpp" />
     <ClCompile Include="tdf_parser.cpp" />
@@ -258,6 +259,7 @@
     <ClInclude Include="include\zlib\zlib.h" />
     <ClInclude Include="main_window.h" />
     <ClInclude Include="model_extractor.h" />
+    <ClInclude Include="model_preview.h" />
     <ClInclude Include="openGL.h" />
     <ClInclude Include="repacking.h" />
     <ClInclude Include="tdf_json_parser.h" />
