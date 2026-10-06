@@ -197,6 +197,9 @@ inline void qaxisOf(const Quat& q, double v[3]) {
     if (s < 1e-12) { v[0] = 1; v[1] = v[2] = 0; return; }
     v[0] = sg * q.x / s; v[1] = sg * q.y / s; v[2] = sg * q.z / s;
 }
+// mirror a rotation across the YZ plane (S R S with S = diag(-1, 1, 1))
+inline Quat qmirrorX(const Quat& q) { return { q.x, -q.y, -q.z, q.w }; }
+ 
 // shortest-arc rotation taking unit vector a onto unit vector b
 inline Quat qfromTo(const double a[3], const double b[3]) {
     double d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -213,6 +216,20 @@ inline void matFromQuat(const Quat& q, double m[3][3]) {
     m[0][0] = 1 - 2 * (y * y + z * z); m[0][1] = 2 * (x * y - z * w);     m[0][2] = 2 * (x * z + y * w);
     m[1][0] = 2 * (x * y + z * w);     m[1][1] = 1 - 2 * (x * x + z * z); m[1][2] = 2 * (y * z - x * w);
     m[2][0] = 2 * (x * z - y * w);     m[2][1] = 2 * (y * z + x * w);     m[2][2] = 1 - 2 * (x * x + y * y);
+}
+ 
+// Axis frame C with C * rest * C^-1 == bind (both rotations by the same angle). Face rigs
+// turn their frames about the vertical axis to follow the surface, so a pure turn about Y
+// is used when it fits exactly; otherwise the shortest arc between the two rotation axes.
+inline Quat axisFrameFrom(const Quat& rest, const Quat& bind) {
+    double ar[3], ab[3];
+    qaxisOf(rest, ar); qaxisOf(bind, ab);
+    double hr = std::hypot(ar[0], ar[2]), hb = std::hypot(ab[0], ab[2]);
+    if (std::fabs(ar[1] - ab[1]) < 1e-4 && hr > 1e-3 && hb > 1e-3) {
+        double phi = std::atan2(ar[2], ar[0]) - std::atan2(ab[2], ab[0]);  // Ry(phi) maps ar onto ab
+        return qaxis(1, phi);
+    }
+    return qfromTo(ar, ab);
 }
  
 inline Quat quatFromMatrix(const double m[3][3]) {  // m[row][col], orthonormal
@@ -376,77 +393,72 @@ struct PropAttach {
     double gripTime = -1;      // when the prop's offset in the target is taken (default: start)
 };
  
+// Rotation axis frame for a bone whose game-side hinge isn't recorded in the model
+// (rest angle zero, e.g. Kosmo's eyelids, which hinge on the eye's own axis). The animated
+// rotation turns about the bone's axes rotated by these Euler angles (degrees, glTF space,
+// applied X then Y then Z). The mirror partner (left/right) gets the mirrored frame
+// automatically unless it has its own entry.
+struct AxisFrame {
+    std::string bone;
+    double rx = 0, ry = 0, rz = 0;
+};
+ 
 struct ImportOptions {
     std::string outPath;              // default "<model>_anim.glb" / "<model>_anim.gltf"
     double fps = 60.0;                // bake rate
     bool clampNegativeScale = true;   // see header comment
     std::vector<PropAttach> attach;   // optional prop attachments
-    bool replaceExisting = false;     // delete the model's existing animations before adding this one
-    std::atomic<float>* progress = nullptr;  // optional, set to 0..1 while importing (for a progress bar on another thread)
+    std::vector<AxisFrame> axisFrames;// optional hinge axes (see AxisFrame)
+    std::string gatorPath;            // optional: the game's original model (.gator). When given,
+                                      // every bone's rotation frames are read from it (exact),
+                                      // instead of being reconstructed from the glTF bind pose.
 };
-
-// largest number stored under `key` anywhere in v (-1 if none)
-inline void maxIndexOfKey(const Json& v, const char* key, int& maxIdx) {
-    if (v.type == Json::Object) {
-        for (const auto& [k, c] : v.o) {
-            if (k == key && c.type == Json::Number) maxIdx = std::max(maxIdx, int(c.num()));
-            maxIndexOfKey(c, key, maxIdx);
-        }
-    } else if (v.type == Json::Array) {
-        for (const Json& c : v.a) maxIndexOfKey(c, key, maxIdx);
+ 
+// Game row-vector 4x4 matrix (16 floats, as stored in .gator) -> glTF-space rotation:
+// transpose to column-vector form, then mirror X (S M S).
+inline Quat gatorMatrixToQuat(const double* v16) {
+    double m[3][3];
+    for (int r = 0; r < 3; ++r) for (int c = 0; c < 3; ++c) {
+        double v = v16[4 * c + r];
+        m[r][c] = ((r == 0) != (c == 0)) ? -v : v;
     }
+    return quatFromMatrix(m);
 }
-
-// Removes all animations, then trims the accessors / bufferViews / buffers / GLB binary
-// bytes at the end that nothing references anymore. Animation data is always appended
-// last, so trimming from the end frees it without renumbering anything; data that
-// something else still uses stops the trim and stays.
-inline void removeAnimations(Json& doc, std::vector<uint8_t>& bin, bool glbEmbeddedBin) {
-    doc["animations"].a.clear();
-
-    // accessors used by meshes and skins
-    int maxAccessor = -1;
-    auto use = [&](const Json* j) { if (j && j->type == Json::Number) maxAccessor = std::max(maxAccessor, int(j->num())); };
-    if (const Json* meshes = doc.find("meshes"))
-        for (const Json& mesh : meshes->a)
-            if (const Json* prims = mesh.find("primitives"))
-                for (const Json& prim : prims->a) {
-                    use(prim.find("indices"));
-                    if (const Json* attrs = prim.find("attributes")) for (const auto& [k, a] : attrs->o) use(&a);
-                    if (const Json* targets = prim.find("targets"))
-                        for (const Json& t : targets->a) for (const auto& [k, a] : t.o) use(&a);
-                }
-    if (const Json* skins = doc.find("skins"))
-        for (const Json& skin : skins->a) use(skin.find("inverseBindMatrices"));
-    Json& accessors = doc["accessors"];
-    while (int(accessors.a.size()) > maxAccessor + 1) accessors.a.pop_back();
-
-    // bufferViews used by the remaining accessors, images, extensions...
-    int maxView = -1;
-    maxIndexOfKey(doc, "bufferView", maxView);
-    Json& views = doc["bufferViews"];
-    while (int(views.a.size()) > maxView + 1) views.a.pop_back();
-
-    // buffers used by the remaining bufferViews (buffer 0 is always kept)
-    int maxBuffer = 0;
-    for (const Json& v : views.a)
-        if (const Json* b = v.find("buffer")) maxBuffer = std::max(maxBuffer, int(b->num()));
-    Json& buffers = doc["buffers"];
-    while (int(buffers.a.size()) > maxBuffer + 1) buffers.a.pop_back();
-
-    // cut the embedded binary down to the end of the last view that still lives in it
-    if (glbEmbeddedBin && !buffers.a.empty()) {
-        size_t end = 0;
-        for (const Json& v : views.a) {
-            const Json* b = v.find("buffer");
-            if (b && int(b->num()) != 0) continue;
-            const Json* off = v.find("byteOffset");
-            const Json* len = v.find("byteLength");
-            end = std::max(end, size_t(off ? off->num() : 0) + size_t(len ? len->num() : 0));
+ 
+// Per-bone rotation frames from a .gator model (GATR v29): each bone record stores two
+// extra matrices; the game's local rotation is  M4 * R(anim) * M3  (row-vector form).
+struct GatorFrames {
+    std::vector<std::string> names;
+    std::vector<Quat> pre, post;   // glTF space, column-vector: local = pre * R * post
+};
+inline GatorFrames ReadGatorFrames(const std::string& path) {
+    std::vector<uint8_t> d = readFile(path);
+    auto u32 = [&](size_t o) { if (o + 4 > d.size()) throw std::runtime_error("gator: truncated"); uint32_t v; std::memcpy(&v, &d[o], 4); return v; };
+    auto u16 = [&](size_t o) { if (o + 2 > d.size()) throw std::runtime_error("gator: truncated"); uint16_t v; std::memcpy(&v, &d[o], 2); return v; };
+    auto f32 = [&](size_t o) { if (o + 4 > d.size()) throw std::runtime_error("gator: truncated"); float v; std::memcpy(&v, &d[o], 4); return double(v); };
+    if (d.size() < 84 || std::memcmp(d.data(), "GATR", 4) != 0) throw std::runtime_error("not a .gator file: " + path);
+    uint32_t boneCount = u32(32), bonesTable = u32(68), strOffsets = u32(76), strTable = u32(80);
+    uint16_t strCount = u16(46);
+    GatorFrames gf;
+    for (uint32_t i = 0; i < boneCount; ++i) {
+        size_t rec = size_t(bonesTable) + 288u * i;
+        // game row-vector matrix -> column-vector (transpose) -> glTF space (mirror X: S M S)
+        auto frame = [&](size_t o) {
+            double v[16];
+            for (int k = 0; k < 16; ++k) v[k] = f32(o + 4 * k);
+            return gatorMatrixToQuat(v);
+        };
+        gf.post.push_back(frame(rec + 160));   // matrix_3
+        gf.pre.push_back(frame(rec + 224));    // matrix_4
+        std::string name;
+        if (i < strCount) {
+            size_t s0 = size_t(strTable) + u32(size_t(strOffsets) + 4 * i), e = s0;
+            while (e < d.size() && d[e]) ++e;
+            name.assign(reinterpret_cast<const char*>(d.data()) + s0, e - s0);
         }
-        if (end < bin.size()) bin.resize(end);
-        buffers.a[0]["byteLength"] = Json::makeNumber(double(bin.size()));
+        gf.names.push_back(name);
     }
+    return gf;
 }
  
 // Bakes the animation and writes the result. Returns false and fills *error on failure.
@@ -455,11 +467,6 @@ inline bool ImportAnimIntoGltf(const std::string& animPath, const std::string& g
     const std::string& outPathIn = opt.outPath;
     double fps = opt.fps;
     bool clampNegativeScale = opt.clampNegativeScale;
-    // the three per-bone passes each make up a third of the progress
-    auto reportProgress = [&](int pass, uint32_t bone, uint32_t boneCount) {
-        if (opt.progress && boneCount > 0) opt.progress->store((pass + float(bone) / float(boneCount)) / 3.0f);
-    };
-    if (opt.progress) opt.progress->store(0.0f);
     try {
         // --- load model ---
         std::vector<uint8_t> model = readFile(gltfPath);
@@ -493,11 +500,7 @@ inline bool ImportAnimIntoGltf(const std::string& animPath, const std::string& g
         Json& views = doc["bufferViews"];
         Json& accessors = doc["accessors"];
         Json& animations = doc["animations"];
-
-        // must run before buffer0Len is read below, since it can shrink the binary
-        if (opt.replaceExisting && !animations.a.empty())
-            removeAnimations(doc, bin, isGlb && hasBin && !buffers.a.empty() && !buffers.a[0].find("uri"));
-
+ 
         // where the new binary data goes
         bool appendToGlbBin = false;
         size_t buffer0Len = 0;
@@ -730,7 +733,6 @@ inline bool ImportAnimIntoGltf(const std::string& animPath, const std::string& g
         std::vector<std::vector<double>> gP(boneCount, std::vector<double>(3 * T));  // translation before parent scale
         std::vector<std::vector<Quat>> gQ(boneCount, std::vector<Quat>(T));         // final local rotation
         for (uint32_t i = 0; i < boneCount; ++i) {
-            reportProgress(0, i, boneCount);
             BoneInfo& bi = info[i];
             bi.restructured = frameOf[i] >= 0;
             bi.trNode = bi.restructured ? frameOf[i] : int(i);
@@ -751,8 +753,32 @@ inline bool ImportAnimIntoGltf(const std::string& animPath, const std::string& g
         // the identity-side bone the mirrored axis frame. (Vince: pure flip -> no change.)
         std::vector<char> hasMirrorFrame(boneCount, 0);
         std::vector<Quat> mirrorFrame(boneCount);
+        std::vector<double> wpos(3 * boneCount), wrot(9 * boneCount);
+        // mirror partner of a bone: the bone at the X-mirrored bind position
+        auto findMirror = [&](uint32_t a) -> int {
+            const double* pa = &wpos[3 * a];
+            if (std::fabs(pa[0]) < 1e-4) return -1;
+            double norm = std::sqrt(pa[0] * pa[0] + pa[1] * pa[1] + pa[2] * pa[2]);
+            int best = -1; double bestD = 1e30;
+            for (uint32_t b = 0; b < boneCount; ++b) {
+                if (b == a) continue;
+                const double* pb = &wpos[3 * b];
+                double d = std::sqrt((pb[0] + pa[0]) * (pb[0] + pa[0]) + (pb[1] - pa[1]) * (pb[1] - pa[1]) + (pb[2] - pa[2]) * (pb[2] - pa[2]));
+                if (d < bestD) { bestD = d; best = int(b); }
+            }
+            return (best >= 0 && bestD <= 1e-3 * std::max(1.0, norm)) ? best : -1;
+        };
+        // C = Ra^T * (-S * Rb * Cb): axis frame for bone a that mirrors bone b's axes
+        auto mirroredFrame = [&](uint32_t a, uint32_t b, const Quat& cb) {
+            double Cb[3][3], RbC[3][3], A[3][3], C[3][3];
+            matFromQuat(cb, Cb);
+            const double* Rb = &wrot[9 * b]; const double* Ra = &wrot[9 * a];
+            for (int r = 0; r < 3; ++r) for (int c = 0; c < 3; ++c) { double v = 0; for (int k = 0; k < 3; ++k) v += Rb[3 * r + k] * Cb[k][c]; RbC[r][c] = v; }
+            for (int r = 0; r < 3; ++r) for (int c = 0; c < 3; ++c) A[r][c] = (r == 0 ? 1.0 : -1.0) * RbC[r][c];
+            for (int r = 0; r < 3; ++r) for (int c = 0; c < 3; ++c) { double v = 0; for (int k = 0; k < 3; ++k) v += Ra[3 * k + r] * A[k][c]; C[r][c] = v; }
+            return quatFromMatrix(C);
+        };
         {
-            std::vector<double> wpos(3 * boneCount), wrot(9 * boneCount);
             std::vector<char> wdone(boneCount, 0);
             std::function<void(uint32_t)> bindWorld = [&](uint32_t b) {
                 if (wdone[b]) return;
@@ -778,34 +804,75 @@ inline bool ImportAnimIntoGltf(const std::string& animPath, const std::string& g
             for (uint32_t b = 0; b < boneCount; ++b) bindWorld(b);
             for (uint32_t a = 0; a < boneCount; ++a) {
                 if (std::fabs(std::fabs(info[a].bq.w) - 1) > 1e-4) continue;   // identity-bind side only
-                const double* pa = &wpos[3 * a];
-                if (std::fabs(pa[0]) < 1e-4) continue;
-                double norm = std::sqrt(pa[0] * pa[0] + pa[1] * pa[1] + pa[2] * pa[2]);
-                int best = -1; double bestD = 1e30;
-                for (uint32_t b = 0; b < boneCount; ++b) {
-                    if (b == a) continue;
-                    const double* pb = &wpos[3 * b];
-                    double d = std::sqrt((pb[0] + pa[0]) * (pb[0] + pa[0]) + (pb[1] - pa[1]) * (pb[1] - pa[1]) + (pb[2] - pa[2]) * (pb[2] - pa[2]));
-                    if (d < bestD) { bestD = d; best = int(b); }
-                }
-                if (best < 0 || bestD > 1e-3 * std::max(1.0, norm)) continue;
-                const double* Rb = &wrot[9 * best];
-                if (Rb[3 * 1 + 1] > -0.5) continue;                             // partner must be on a flipped chain
-                const double* Ra = &wrot[9 * a];
-                // C = Ra^T * (-S * Rb),  S = diag(-1, 1, 1)
-                double A[3][3], C[3][3];
-                for (int r = 0; r < 3; ++r) for (int c = 0; c < 3; ++c) A[r][c] = (r == 0 ? 1.0 : -1.0) * Rb[3 * r + c];
-                for (int r = 0; r < 3; ++r) for (int c = 0; c < 3; ++c) {
-                    double v = 0; for (int k = 0; k < 3; ++k) v += Ra[3 * k + r] * A[k][c]; C[r][c] = v;
-                }
-                Quat cq = quatFromMatrix(C);
+                int best = findMirror(a);
+                if (best < 0) continue;
+                if (wrot[9 * best + 4] > -0.5) continue;                       // partner must be on a flipped chain
+                Quat cq = mirroredFrame(a, uint32_t(best), Quat());
                 if (qangle(cq) < 0.5 * 3.14159265358979 / 180) continue;
                 hasMirrorFrame[a] = 1; mirrorFrame[a] = cq;
             }
         }
+        // user-given axis frames (and their mirrored partners)
+        for (const AxisFrame& af : opt.axisFrames) {
+            int a = -1;
+            for (uint32_t n = 0; n < boneCount; ++n)
+                if (const Json* nm = nodes.a[n].find("name"); nm && nm->type == Json::String && nm->s == af.bone) a = int(n);
+            if (a < 0) throw std::runtime_error("axisFrames: no animated bone named '" + af.bone + "'");
+            const double d2r = 3.14159265358979 / 180;
+            Quat c = eulerXYZ(af.rx * d2r, af.ry * d2r, af.rz * d2r);
+            hasMirrorFrame[a] = 2; mirrorFrame[a] = c;
+        }
+        for (const AxisFrame& af : opt.axisFrames) {
+            for (uint32_t a = 0; a < boneCount; ++a) {
+                const Json* nm = nodes.a[a].find("name");
+                if (!(nm && nm->type == Json::String && nm->s == af.bone)) continue;
+                int p = findMirror(a);
+                if (p >= 0 && hasMirrorFrame[p] != 2) { hasMirrorFrame[p] = 3; mirrorFrame[p] = mirroredFrame(uint32_t(p), a, mirrorFrame[a]); }
+            }
+        }
+ 
+        // frames from the original .gator model, if given
+        std::vector<char> hasGator(boneCount, 0);
+        std::vector<Quat> gPre(boneCount), gPost(boneCount);
+        if (!opt.gatorPath.empty()) {
+            GatorFrames gf = ReadGatorFrames(opt.gatorPath);
+            for (uint32_t i = 0; i < boneCount; ++i) {
+                int gi = -1;
+                if (const Json* nm = nodes.a[i].find("name"); nm && nm->type == Json::String)
+                    for (size_t k = 0; k < gf.names.size(); ++k) if (gf.names[k] == nm->s) { gi = int(k); break; }
+                if (gi < 0 && i < gf.names.size()) gi = int(i);
+                if (gi >= 0) { hasGator[i] = 1; gPre[i] = gf.pre[gi]; gPost[i] = gf.post[gi]; }
+            }
+        }
+        // ... or from node extras written by the model converter:
+        //   "extras": { "axis_frame": [16 floats], "axis_frame_inverse": [16 floats] }
+        // (the two .gator matrices, copied as stored)
+        for (uint32_t i = 0; i < boneCount; ++i) {
+            if (hasGator[i]) continue;
+            int n = info[i].trNode;   // helper "_frame" nodes carry the bone's rotation
+            const Json* ex = nodes.a[i].find("extras");
+            if (!(ex && ex->find("axis_frame"))) ex = nodes.a[n].find("extras");
+            if (!ex) continue;
+            const Json* af = ex->find("axis_frame"); const Json* ai = ex->find("axis_frame_inverse");
+            if (!(af && ai && af->a.size() == 16 && ai->a.size() == 16)) continue;
+            double v[16], w[16];
+            for (int k = 0; k < 16; ++k) { v[k] = af->a[k].num(); w[k] = ai->a[k].num(); }
+            hasGator[i] = 1; gPost[i] = gatorMatrixToQuat(v); gPre[i] = gatorMatrixToQuat(w);
+        }
+ 
+        // rule b frames (bind == C * rest * C^-1), needed by mirror partners below
+        std::vector<char> hasRestFrame(boneCount, 0);
+        std::vector<Quat> restFrame(boneCount);
+        for (uint32_t i = 0; i < boneCount; ++i) {
+            const Quat bq = info[i].bq;
+            if (std::fabs(std::fabs(bq.w) - 1) < 1e-4 || std::fabs(std::fabs(bq.x) - 1) < 1e-4) continue;
+            Quat rest = eulerXYZ(anim.channel(i, AnimFile::CH_RX).rest, -anim.channel(i, AnimFile::CH_RY).rest,
+                                 -anim.channel(i, AnimFile::CH_RZ).rest);
+            double angRest = qangle(rest), angBind = qangle(bq);
+            if (angRest > 1e-3 && std::fabs(angRest - angBind) < 2e-3) { hasRestFrame[i] = 1; restFrame[i] = axisFrameFrom(rest, bq); }
+        }
  
         for (uint32_t i = 0; i < boneCount; ++i) {
-            reportProgress(1, i, boneCount);
             BoneInfo& bi = info[i];
             const Quat bq = bi.bq;
  
@@ -815,23 +882,37 @@ inline bool ImportAnimIntoGltf(const std::string& animPath, const std::string& g
             //     tilted axis (e.g. eyelids hinged along the eye): the bind defines a
             //     rotation frame C, local = C * R(anim) * C^-1
             //  c) otherwise: local = (bind * R(rest)^-1) * R(anim)
-            Quat jo = bq, axisFrame;  // local = jo * C * R * C^-1, C = axisFrame
-            bool useAxisFrame = false;
+            Quat jo = bq, axisFrame, post;  // local = jo * C * R * C^-1 * post, C = axisFrame
+            bool useAxisFrame = false, mirrorRight = false;
+            Quat partnerFrame;
             bool simple = std::fabs(std::fabs(bq.w) - 1) < 1e-4 || std::fabs(std::fabs(bq.x) - 1) < 1e-4;
-            if (hasMirrorFrame[i]) {  // identity bind, axes mirrored from the flipped partner
+            if (hasGator[i]) {        // exact frames from the game's model: local = pre * R * post
+                jo = gPre[i]; post = gPost[i];
+            } else if (hasMirrorFrame[i]) {  // axes mirrored from a partner, or given by the caller
                 axisFrame = mirrorFrame[i];
-                jo = Quat();
+                jo = simple ? bq : Quat();   // keep an identity / pure-flip bind as prefix
+                if (hasMirrorFrame[i] == 1) jo = Quat();
                 useAxisFrame = true;
             } else if (!simple) {
                 Quat rest = eulerXYZ(anim.channel(i, AnimFile::CH_RX).rest, -anim.channel(i, AnimFile::CH_RY).rest,
                                      -anim.channel(i, AnimFile::CH_RZ).rest);
-                double angRest = qangle(rest), angBind = qangle(bq);
-                if (angRest > 1e-3 && std::fabs(angRest - angBind) < 2e-3) {
-                    double ar[3], ab[3];
-                    qaxisOf(rest, ar); qaxisOf(bq, ab);
-                    axisFrame = qfromTo(ar, ab);
+                (void)rest;
+                int p = findMirror(i);
+                if (hasRestFrame[i]) {
+                    axisFrame = restFrame[i];
                     jo = Quat();
                     useAxisFrame = true;
+                } else if (p >= 0 && hasRestFrame[p]) {
+                    // right-side partner of a rule-b bone: its bind is the mirrored partner bind
+                    // followed by a flip F. It turns about the mirrored partner axes, then F:
+                    // local = S (Cp R Cp^-1) S * F
+                    Quat mb = qmirrorX(info[p].bq);
+                    Quat fq = qnorm(qmul(qinv(mb), bq));
+                    if (std::fabs(qangle(fq) - 3.14159265358979) < 1e-2) {
+                        mirrorRight = true; partnerFrame = restFrame[p]; post = fq; jo = Quat();
+                    } else {
+                        jo = qmul(bq, qinv(rest));
+                    }
                 } else {
                     jo = qmul(bq, qinv(rest));
                 }
@@ -844,7 +925,8 @@ inline bool ImportAnimIntoGltf(const std::string& animPath, const std::string& g
                 Quat r = eulerXYZ(anim.evaluate(i, AnimFile::CH_RX, t), -anim.evaluate(i, AnimFile::CH_RY, t),
                                   -anim.evaluate(i, AnimFile::CH_RZ, t));
                 if (useAxisFrame) r = qmul(axisFrame, qmul(r, qinv(axisFrame)));
-                gQ[i][k] = qnorm(qmul(jo, r));
+                if (mirrorRight) r = qmirrorX(qmul(partnerFrame, qmul(r, qinv(partnerFrame))));
+                gQ[i][k] = qnorm(qmul(qmul(jo, r), post));
             }
         }
  
@@ -937,7 +1019,6 @@ inline bool ImportAnimIntoGltf(const std::string& animPath, const std::string& g
  
         // ---- phase C: write channels ----
         for (uint32_t i = 0; i < boneCount; ++i) {
-            reportProgress(2, i, boneCount);
             const BoneInfo& bi = info[i];
             bool restructured = bi.restructured, parentRestructured = bi.parentRestructured;
             int trNode = bi.trNode, lp = bi.lp;
@@ -1045,7 +1126,6 @@ inline bool ImportAnimIntoGltf(const std::string& animPath, const std::string& g
         }
         writeFile(outPath, out);
         if (!extBinPath.empty()) writeFile(extBinPath, extBin);
-        if (opt.progress) opt.progress->store(1.0f);
         return true;
     } catch (const std::exception& e) {
         if (error) *error = e.what();
@@ -1060,10 +1140,10 @@ static std::string selected_model_file;
 int fps = 60;
 
 // state shared between the UI and the import thread
+// progress is only tracked per file, so the importer itself doesn't need to know about the progress bar
 static std::jthread apply_thread;                   // jthread joins on destruction, so closing the app mid-import is safe
 static std::atomic<bool> applying = false;
 static std::atomic<int> files_done = 0;
-static std::atomic<float> file_progress = 0.0f;     // progress inside the file currently being imported
 static int files_total = 0;
 static int files_failed = 0;                        // only written by the worker, read once applying is false
 static std::mutex error_mutex;
@@ -1079,7 +1159,6 @@ static void start_applying()
     files_total = static_cast<int>(anims.size());
     files_failed = 0;
     files_done = 0;
-    file_progress = 0.0f;
     {
         std::lock_guard lock(error_mutex);
         apply_errors.clear();
@@ -1088,22 +1167,14 @@ static void start_applying()
 
     apply_thread = std::jthread([anims = std::move(anims), model = std::move(model), bake_fps]
     {
-        // the first successful import of the batch clears the old animations, the rest add to it
-        bool cleared = false;
         for (const auto& animation : anims)
         {
             ImportOptions options;
             options.fps = bake_fps;
             options.outPath = model;
-            options.replaceExisting = !cleared;
-            options.progress = &file_progress;
 
             std::string error_message;
-            if (ImportAnimIntoGltf(animation, model, options, &error_message))
-            {
-                cleared = true;
-            }
-            else
+            if (!ImportAnimIntoGltf(animation, model, options, &error_message))
             {
                 std::string error = std::filesystem::path(animation).filename().string() + ": " + error_message;
                 printf("failed to import animation %s\n", error.c_str());
@@ -1115,14 +1186,6 @@ static void start_applying()
         }
         applying = false;
     });
-}
-// Short form (kept for existing callers).
-inline bool ImportAnimIntoGltf(const std::string& animPath, const std::string& gltfPath,
-                               const std::string& outPath = "", double fps = 60.0, std::string* error = nullptr,
-                               bool clampNegativeScale = true) {
-    ImportOptions opt;
-    opt.outPath = outPath; opt.fps = fps; opt.clampNegativeScale = clampNegativeScale;
-    return ImportAnimIntoGltf(animPath, gltfPath, opt, error);
 }
 
 static void display_animation_files(const std::string& path)
@@ -1210,7 +1273,9 @@ static void display_animation_files(const std::string& path)
         float fraction;
         if (busy)
         {
-            fraction = std::min((done + file_progress) / files_total, 1.0f);
+            // a single file has no steps to show, so let the bar animate instead (negative fraction = indeterminate)
+            fraction = files_total == 1 ? -1.0f * static_cast<float>(ImGui::GetTime())
+                                        : static_cast<float>(done) / files_total;
             snprintf(overlay, sizeof(overlay), "%d / %d", done, files_total);
         }
         else

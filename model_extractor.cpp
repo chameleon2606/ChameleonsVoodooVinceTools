@@ -358,10 +358,14 @@ void extract_model(std::string current_filepath)
         // mirror every bone's bind/inverse-bind matrices to match the flipped mesh
         vector<array<array<float,4>,4>> mirrored_bind(bones.size());
         vector<array<array<float,4>,4>> mirrored_inv_bind(bones.size());
+        vector<array<array<float,4>,4>> axis_bind(bones.size());
+        vector<array<array<float,4>,4>> axis_inv_bind(bones.size());
         for (size_t k = 0; k < bones.size(); k++)
         {
             mirrored_bind[k]     = mirror_x(to_array(bones[k].bind_matrix));
             mirrored_inv_bind[k] = mirror_x(to_array(bones[k].inverse_bind_matrix));
+            axis_bind[k] = to_array(bones[k].matrix_3);
+            axis_inv_bind[k] = to_array(bones[k].matrix_4);
         }
         
         // loops though bones again to collect all bone data
@@ -370,11 +374,20 @@ void extract_model(std::string current_filepath)
         {
             vector<float>pose_positions;
             array<array<float,4>,4> local_matrix;
+            vector<float>axis_vector;
+            array<array<float,4>,4> axis_list;
+            vector<float>axis_inv_vector;
+            array<array<float,4>,4> axis_inv_list;
 
             // collects inverse bind matrix data for the .bin file
             for (int row = 0; row < 4; ++row)
                 for (int col = 0; col < 4; ++col)
+                {
                     inverse_bind_matrix_list.push_back(mirrored_inv_bind[i][row][col]);
+                    axis_vector.push_back(axis_bind[i][row][col]);
+                    axis_inv_vector.push_back(axis_inv_bind[i][row][col]);
+                }
+            
 
             // rest pose (relative to parent)
             if (bones[i].parent_index == -1)
@@ -389,16 +402,23 @@ void extract_model(std::string current_filepath)
 
             for (int row = 0; row < 4; ++row)
                 for (int col = 0; col < 4; ++col)
+                {
                     pose_positions.push_back(local_matrix[row][col]);
+                }
             
         
             nlohmann::json bone;
             bone["name"] = string_list[bones[i].index];
             vector<float> bind_data = DecomposeMatrix(pose_positions);
+            //vector<float> anim_bind_data = DecomposeMatrix(axis_vector);
+            //vector<float> anim_inv_bind_data = DecomposeMatrix(axis_inv_vector);
+            
             
             vector<float> pos(bind_data.begin(), bind_data.begin()+3), rot(bind_data.begin()+3, bind_data.begin()+7), sz(bind_data.begin()+7, bind_data.end());
             bone["translation"] = pos;
             bone["rotation"] = rot;
+            bone["extras"]["axis_frame"] = axis_vector;
+            bone["extras"]["axis_frame_inverse"] = axis_inv_vector;
             bone["scale"] = sz;
             
             vector<int16_t> bone_children_list;
