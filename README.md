@@ -15,7 +15,8 @@
 
 #### Animation applier:
 * unpack models and animations first, then go to the animation applier tab, select some animations and the 3D model to apply it to
-* choose what framerate the animations should be baked to 
+* choose what framerate the animations should be baked to
+<img width="802" height="632" alt="Screenshot 2026-10-07 013227" src="https://github.com/user-attachments/assets/896aed09-3419-4759-b2b0-5e3573cfb67b" />
   
 #### Level extraction:
 * extracting the world.hot file will use the containing files and build a .obj file of that level, including textures
@@ -31,4 +32,3 @@
 just choose the format **8.8.8.8 BGRA 32 bpp**
 
 <img width="802" height="632" alt="Repacker" src="https://github.com/user-attachments/assets/9ea2837d-d1c9-4d90-a5a1-491576790f3c" />
-
