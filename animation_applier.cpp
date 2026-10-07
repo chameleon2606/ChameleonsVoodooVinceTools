@@ -1227,7 +1227,7 @@ static void display_animation_files(const std::string& path)
     ImGui::BeginChild("3D Models", ImVec2(half_width, list_height), ImGuiChildFlags_Borders);
     for (auto& entry : std::filesystem::directory_iterator(path))
     {
-        if (entry.path().string().ends_with(".glb"))
+        if (entry.path().string().ends_with(".glb") || entry.path().string().ends_with(".gltf"))
         {
             std::string model_file = entry.path().string();
             if (ImGui::RadioButton(entry.path().filename().string().c_str(), selected_model_file == model_file))

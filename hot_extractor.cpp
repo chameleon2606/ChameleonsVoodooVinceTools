@@ -610,7 +610,7 @@ void extract_hot_file(string* filepath)
             taskThread.join();
         }
         
-        if (filename == "index.tdf")
+        if (filename == "index.tdf" && convert_world)
         {
             output_file.close();
             ofstream json_file(combined_output_path+"index.json");
